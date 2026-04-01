@@ -1,0 +1,12 @@
+{
+  "dependencies": {
+    "@hono/node-server": "^1.19.12",
+    "axios": "^1.14.0",
+    "dotenv": "^17.3.1",
+    "hono": "^4.12.9"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
+  }
+}
