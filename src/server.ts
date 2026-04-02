@@ -27,6 +27,19 @@ app.post("/api/analyze", async (req, res) => {
   }
 });
 
+app.get("/api/:type/:value", async (req, res) => {
+  try {
+    const { type, value } = req.params;
+
+    const data = await fetchVirusTotal(value, type);
+
+    res.json(data);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to fetch VirusTotal data" });
+  }
+});
+
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
