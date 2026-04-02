@@ -2,13 +2,15 @@ import dotenv from "dotenv"
 import { Hono } from "hono"
 import { serve } from "@hono/node-server"
 import net from "net"
+import { cors } from "hono/cors";
 
 import { fetchVirusTotal } from "./virustotal.js"
 import { checkIP, getLocationFallback } from "./abuseipdb.js"
 
 dotenv.config()
+const app = new Hono();
+app.use("*", cors());
 
-const app = new Hono()
 
 /* ===============================
    🌐 ROOT
