@@ -14,7 +14,7 @@ export async function checkIP(ip: string) {
       },
       params: {
         ipAddress: ip,
-        maxAgeInDays: 90,
+        maxAgeInDays: 365,
         verbose: true
       }
     })
