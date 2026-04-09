@@ -37,6 +37,14 @@ STRICT RULES:
 - Use bullet points exactly as shown
 - Do NOT change section titles
 
+MARKDOWN RULES (VERY IMPORTANT):
+- You MUST use **bold formatting** using double asterisks (**text**)
+- Apply **bold ONLY** to:
+  - Threat level (LOW, MEDIUM, HIGH, CRITICAL)
+  - Overall classification
+  - Severity rating
+  - Key risk conclusions
+- DO NOT return plain text for those values
 
 FORMAT:
 
@@ -48,13 +56,13 @@ Analysis of ${type.toUpperCase()}: ${indicator}
 
 This automated threat intelligence report provides a comprehensive assessment based on multi-source intelligence gathering from VirusTotal and AbuseIPDB databases.
 
-Current Threat Assessment: [FILL]
+Current Threat Assessment: **[FILL]**
 
 ---
 
 1. THREAT LEVEL ASSESSMENT
 
-Overall Classification: [FILL]
+Overall Classification: **[FILL]**
 
 Risk Indicators:
 - VirusTotal Malicious Detections: ${malicious}
@@ -62,7 +70,7 @@ Risk Indicators:
 - AbuseIPDB Confidence Score: ${abuseScore}%
 - Total Abuse Reports: ${totalReports}
 
-Severity Rating: [LOW / MEDIUM / HIGH / CRITICAL]
+Severity Rating: **[LOW / MEDIUM / HIGH / CRITICAL]**
 
 ---
 
@@ -79,7 +87,7 @@ VirusTotal Intelligence Summary
 - Suspicious Verdicts: ${suspicious}
 - Clean/Harmless: ${harmless}
 
-Detection Rate: [CALCULATE %]
+Detection Rate: **[CALCULATE %]**
 
 Vendor Consensus: [SHORT ANALYSIS]
 
@@ -94,7 +102,7 @@ AbuseIPDB Reputation Analysis
 Primary IOC:
 - Type: ${type}
 - Value: ${indicator}
-- Status: [MALICIOUS / SUSPICIOUS / CLEAN]
+- Status: **[MALICIOUS / SUSPICIOUS / CLEAN]**
 
 Associated Risk Factors:
 - [WRITE 2-4 BULLET POINTS]
@@ -105,14 +113,14 @@ Associated Risk Factors:
 
 [WRITE SHORT PROFESSIONAL CONCLUSION]
 
-Analyst Recommendation: [ACTION]
+Analyst Recommendation: **[ACTION]**
 
 Next Review: [TIME]
 
 ---
 
 Report ID: ${Date.now().toString(36).toUpperCase()}
-Classification: [CONFIDENTIAL / INTERNAL USE]
+Classification: CONFIDENTIAL
 `;
 
   const completion = await client.chat.completions.create({
