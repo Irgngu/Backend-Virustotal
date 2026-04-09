@@ -51,7 +51,7 @@ app.post("/chat", async (c) => {
 
     const abuseScore = abuseData.abuseConfidenceScore || 0;
     const totalReports = abuseData.totalReports || 0;
-
+    const totalVendors = malicious + suspicious + harmless + undetected;
     const threatLevel =
       malicious > 0 ? "HIGH" : suspicious > 0 ? "MEDIUM" : "LOW";
 
@@ -63,6 +63,9 @@ app.post("/chat", async (c) => {
       suspicious,
       abuseScore,
       totalReports,
+      harmless,
+      undetected,
+      totalVendors,
     });
 
     return c.json({

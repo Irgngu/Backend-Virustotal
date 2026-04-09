@@ -39,11 +39,7 @@ export async function fetchVirusTotal(indicator: string, type: string) {
   }));
 
   const threatLevel =
-  stats.malicious > 0
-    ? "HIGH"
-    : stats.suspicious > 0
-    ? "MEDIUM"
-    : "LOW";
+    stats.malicious > 0 ? "HIGH" : stats.suspicious > 0 ? "MEDIUM" : "LOW";
 
   return {
     indicator,
@@ -51,11 +47,7 @@ export async function fetchVirusTotal(indicator: string, type: string) {
     threatLevel,
     stats,
     total:
-      stats.malicious +
-      stats.suspicious +
-      stats.harmless +
-      stats.undetected,
+      stats.malicious + stats.suspicious + stats.harmless + stats.undetected,
     vendors,
-    
   };
 }

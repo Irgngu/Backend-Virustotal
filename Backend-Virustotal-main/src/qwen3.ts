@@ -22,6 +22,7 @@ export async function generateReportAI(data: any) {
     abuseScore,
     totalReports,
   } = data;
+  const totalVendors = malicious + suspicious + harmless + undetected;
 
   const prompt = `
 You are a cybersecurity analyst.
@@ -73,9 +74,7 @@ Analysis Metadata
 - Analysis Timestamp: ${new Date().toISOString()}
 
 VirusTotal Intelligence Summary
-- Total Security Vendors Analyzed: ${
-    malicious + suspicious + harmless + undetected
-  }
+- Total Security Vendors Analyzed: ${totalVendors}
 - Malicious Verdicts: ${malicious}
 - Suspicious Verdicts: ${suspicious}
 - Clean/Harmless: ${harmless}
