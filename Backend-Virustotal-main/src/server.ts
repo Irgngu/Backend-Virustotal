@@ -8,9 +8,11 @@ import net from "net";
 import { fetchVirusTotal } from "./virustotal.js";
 import { checkIP, getLocationFallback } from "./abuseipdb.js";
 import { generateReportAI } from "./qwen3.js";
+import exportRoute from "./routes/export.js";
 const app = new Hono();
 
 app.use("*", cors());
+app.route("/api", exportRoute);
 
 /* ===============================
    🌐 ROOT
