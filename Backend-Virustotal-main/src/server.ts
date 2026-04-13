@@ -178,6 +178,41 @@ app.post("/check-ip", async (c) => {
   }
 });
 
+app.get('/api/:type/:value', async (c) => {
+  try {
+    const type = c.req.param('type');
+    const value = c.req.param('value');
+
+    if (!type || !value) {
+      return c.json({ error: "Invalid request" }, 400);
+    }
+
+    // 🔥 VirusTotal
+    const vt = await fetchVirusTotal(value, type);
+
+    // 🔥 AbuseIPDB (hanya untuk IP)
+    let abuseData = null;
+    if (type === "ip") {
+      const abuse = await checkIP(value);
+      abuseData = abuse?.data || {};
+    }
+
+    return c.json({
+      success: true,
+      type,
+      value,
+      stats: vt.stats,
+      vendors: vt.vendors,
+      vtData: vt,
+      abuseData: abuseData,
+    });
+
+  } catch (error) {
+    console.error(error);
+    return c.json({ error: "Failed to fetch data" }, 500);
+  }
+});
+
 /* ===============================
    🚀 SERVER START
 ================================ */
