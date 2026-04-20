@@ -7,81 +7,143 @@ import net from "net";
 
 import { fetchVirusTotal } from "./virustotal.js";
 import { checkIP, getLocationFallback } from "./abuseipdb.js";
+
 import { generateReportAI } from "./qwen3.js";
+
+import { searchMISP } from "./misp.js";
+
 import exportRoute from "./routes/export.js";
+
 const app = new Hono();
 
 app.use("*", cors());
+
 app.route("/api", exportRoute);
 
+/* ROOT */
+app.get("/", (c) => c.text("Threat Intelligence API running"));
+
 /* ===============================
-   🌐 ROOT
+   MISP ONLY
 ================================ */
-app.get("/", (c) => {
-  return c.text("Backend Threat Intelligence API running");
+app.post("/misp/search", async (c) => {
+  try {
+    const { indicator } = await c.req.json();
+
+    if (!indicator) {
+      return c.json(
+        {
+          error: "indicator required",
+        },
+        400,
+      );
+    }
+
+    const mispData = await searchMISP(indicator);
+
+    return c.json({
+      success: true,
+      mispData,
+    });
+  } catch (err) {
+    console.error(err);
+
+    return c.json(
+      {
+        error: "Failed fetch MISP data",
+      },
+      500,
+    );
+  }
 });
 
 /* ===============================
-   🤖 QWEN AI CHAT
+   MAIN ANALYZE
 ================================ */
 app.post("/chat", async (c) => {
   try {
     const { indicator, type } = await c.req.json();
 
     if (!indicator || !type) {
-      return c.json({ error: "indicator & type required" }, 400);
+      return c.json(
+        {
+          error: "indicator & type required",
+        },
+        400,
+      );
     }
 
-    // 🔥 1. ambil data VT
+    /* VT */
     const vt = await fetchVirusTotal(indicator, type);
 
-    // 🔥 2. ambil data AbuseIPDB
+    /* Abuse */
     let abuse = null;
+
     if (type === "ip") {
       abuse = await checkIP(indicator);
     }
 
     const abuseData = abuse?.data || {};
 
-    // 🔥 3. extract data
-    const stats = vt.stats;
+    /* MISP */
+    const mispData = await searchMISP(indicator);
+
+    const stats = vt.stats || {};
 
     const malicious = stats.malicious || 0;
+
     const suspicious = stats.suspicious || 0;
+
     const harmless = stats.harmless || 0;
+
     const undetected = stats.undetected || 0;
 
     const abuseScore = abuseData.abuseConfidenceScore || 0;
-    const totalReports = abuseData.totalReports || 0;
-    const totalVendors = malicious + suspicious + harmless + undetected;
-    const threatLevel =
-      malicious > 0 ? "HIGH" : suspicious > 0 ? "MEDIUM" : "LOW";
 
-    // 🔥 4. generate report (BACKEND!)
+    const totalReports = abuseData.totalReports || 0;
+
+    const totalVendors = malicious + suspicious + harmless + undetected;
+
+    /* Correlation */
+    const correlationInsights = [
+      `VirusTotal flagged ${malicious} malicious detections`,
+      `AbuseIPDB score ${abuseScore}% with ${totalReports} reports`,
+      `MISP matched ${mispData.matchCount} threat events`,
+    ].join("\n");
+
+    /* AI Report */
     const aiAnalysis = await generateReportAI({
       type,
       indicator,
       malicious,
       suspicious,
-      abuseScore,
-      totalReports,
       harmless,
       undetected,
+      abuseScore,
+      totalReports,
       totalVendors,
+      correlationInsights,
     });
 
     return c.json({
       success: true,
       aiAnalysis,
+      correlationInsights,
       vtData: vt,
-      abuseData: abuseData,
+      abuseData,
+      mispData,
     });
   } catch (err) {
     console.error(err);
-    return c.json({ error: "Failed generate report" }, 500);
+
+    return c.json(
+      {
+        error: "Failed generate report",
+      },
+      500,
+    );
   }
 });
-
 /* ===============================
    🔬 VIRUSTOTAL ANALYSIS
 ================================ */
