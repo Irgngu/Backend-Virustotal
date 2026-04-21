@@ -123,6 +123,7 @@ app.post("/chat", async (c) => {
       totalReports,
       totalVendors,
       correlationInsights,
+      mispData,
     });
 
     return c.json({
