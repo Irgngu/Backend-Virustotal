@@ -182,6 +182,7 @@ const correlationInsights = insights.join("\n\n");
       totalReports,
       totalVendors,
       correlationInsights,
+      mispData,
     });
 
     return c.json({

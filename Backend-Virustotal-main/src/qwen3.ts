@@ -1,17 +1,11 @@
 import OpenAI from "openai";
 
-/* ===============================
-   🤖 OPTIONAL AI CLIENT
-================================ */
-
-/* ===============================
-🤖 OPTIONAL AI VERSION
-================================ */
 export async function generateReportAI(data: any) {
   const client = new OpenAI({
     baseURL: "https://openrouter.ai/api/v1",
     apiKey: process.env.OPENROUTER_API_KEY,
   });
+
   const {
     type,
     indicator,
@@ -21,111 +15,173 @@ export async function generateReportAI(data: any) {
     undetected,
     abuseScore,
     totalReports,
+    mispData,
   } = data;
+
   const totalVendors = malicious + suspicious + harmless + undetected;
 
-  const prompt = `
-You are a cybersecurity analyst.
+  const isIP =
+    type?.toLowerCase() === "ip" || type?.toLowerCase() === "ip-address";
 
-Generate a COMPREHENSIVE THREAT INTELLIGENCE REPORT.
+  const abuseSection = isIP
+    ? `
+### AbuseIPDB Summary
+
+- Confidence Score: ${abuseScore}%
+- Reports: ${totalReports}
+
+Reputation Verdict:
+[FILL]
+`
+    : "";
+
+  const riskIndicators = isIP
+    ? `
+- VirusTotal Malicious Detections: ${malicious}
+- VirusTotal Suspicious Flags: ${suspicious}
+- AbuseIPDB Confidence Score: ${abuseScore}%
+- Total Abuse Reports: ${totalReports}
+`
+    : `
+- VirusTotal Malicious Detections: ${malicious}
+- VirusTotal Suspicious Flags: ${suspicious}
+`;
+
+  const prompt = `
+You are a senior cybersecurity threat intelligence analyst.
+
+Generate a PROFESSIONAL COMPREHENSIVE THREAT INTELLIGENCE REPORT.
 
 STRICT RULES:
-- Follow EXACT format below
-- Do NOT add extra explanation outside format
-- Use clear professional language
-- Keep formatting clean and structured
-- Use bullet points exactly as shown
-- Do NOT change section titles
+- Follow EXACT structure below
+- Do NOT add extra text outside format
+- Use professional SOC / CTI language
+- Keep formatting clean
+- Use concise intelligence wording
+- Use MISP data only in ONE dedicated section
+- Do not repeat MISP information elsewhere
+- If MISP matchCount = 0 then state no community correlation
+- If threat actor exists mention attribution possibility
+- If published = true treat as validated intelligence
+- If indicator is NOT IP address, completely omit AbuseIPDB section
 
-MARKDOWN RULES (VERY IMPORTANT):
-- You MUST use **bold formatting** using double asterisks (**text**)
-- Apply **bold ONLY** to:
-  - Threat level (LOW, MEDIUM, HIGH, CRITICAL)
-  - Overall classification
-  - Severity rating
-  - Key risk conclusions
-- DO NOT return plain text for those values
+MARKDOWN RULES:
+Use **bold** ONLY for:
+- LOW / MEDIUM / HIGH / CRITICAL
+- Threat verdicts
+- Final recommendations
+- Important classifications
 
 FORMAT:
 
-COMPREHENSIVE THREAT INTELLIGENCE REPORT
+# COMPREHENSIVE THREAT INTELLIGENCE REPORT
 
-EXECUTIVE SUMMARY
+## EXECUTIVE SUMMARY
 
 Analysis of ${type.toUpperCase()}: ${indicator}
 
-This automated threat intelligence report provides a comprehensive assessment based on multi-source intelligence gathering from VirusTotal and AbuseIPDB databases.
+This report provides a multi-source threat assessment using VirusTotal${
+    isIP ? ", AbuseIPDB," : ","
+  } and community intelligence correlation.
 
 Current Threat Assessment: **[FILL]**
 
 ---
 
-1. THREAT LEVEL ASSESSMENT
+## 1. THREAT LEVEL ASSESSMENT
 
 Overall Classification: **[FILL]**
 
 Risk Indicators:
-- VirusTotal Malicious Detections: ${malicious}
-- VirusTotal Suspicious Flags: ${suspicious}
-- AbuseIPDB Confidence Score: ${abuseScore}%
-- Total Abuse Reports: ${totalReports}
+${riskIndicators}
 
 Severity Rating: **[LOW / MEDIUM / HIGH / CRITICAL]**
 
 ---
 
-2. DETAILED ANALYSIS
+## 2. TECHNICAL ANALYSIS
 
-Analysis Metadata
+### Analysis Metadata
+
 - Analysis Type: ${type}
 - Target Indicator: ${indicator}
-- Analysis Timestamp: ${new Date().toISOString()}
+- Timestamp: ${new Date().toISOString()}
 
-VirusTotal Intelligence Summary
-- Total Security Vendors Analyzed: ${totalVendors}
-- Malicious Verdicts: ${malicious}
-- Suspicious Verdicts: ${suspicious}
-- Clean/Harmless: ${harmless}
+### VirusTotal Summary
+
+- Vendors Checked: ${totalVendors}
+- Malicious: ${malicious}
+- Suspicious: ${suspicious}
+- Harmless: ${harmless}
+- Undetected: ${undetected}
 
 Detection Rate: **[CALCULATE %]**
 
-Vendor Consensus: [SHORT ANALYSIS]
+Vendor Consensus:
+[SHORT ANALYSIS]
 
-AbuseIPDB Reputation Analysis
-- Abuse Confidence Score: ${abuseScore}%
-- Total Reports: ${totalReports}
+${abuseSection}
 
 ---
 
-3. INDICATORS OF COMPROMISE (IOCs)
+## 3. MISP COMMUNITY INTELLIGENCE
+
+- Match Count: ${mispData?.matchCount ?? 0}
+- Confidence: ${mispData?.confidence ?? "-"}
+- Threat Level: ${mispData?.threatLevel ?? "-"}
+- Score: ${mispData?.score ?? 0}/100
+- Threat Actor: ${mispData?.threatActor ?? "-"}
+- Source Organization: ${mispData?.sourceOrg ?? "-"}
+- Tags: ${mispData?.tags?.length ? mispData.tags.join(", ") : "-"}
+- Published: ${mispData?.published ? "Yes" : "No"}
+- First Published: ${mispData?.firstPublishDate ?? "-"}
+- Last Published: ${mispData?.lastPublishDate ?? "-"}
+- First Recorded Change: ${mispData?.firstRecordedChange ?? "-"}
+- Last Change: ${mispData?.lastChange ?? "-"}
+
+Community Intelligence Assessment: **[FILL]**
+
+---
+
+## 4. INDICATORS OF COMPROMISE (IOC)
 
 Primary IOC:
+
 - Type: ${type}
 - Value: ${indicator}
 - Status: **[MALICIOUS / SUSPICIOUS / CLEAN]**
 
 Associated Risk Factors:
-- [WRITE 2-4 BULLET POINTS]
+
+- [WRITE RISK FACTOR]
+- [WRITE RISK FACTOR]
+- [WRITE RISK FACTOR]
 
 ---
 
-4. CONCLUSION
+## 5. CONCLUSION
 
 [WRITE SHORT PROFESSIONAL CONCLUSION]
 
 Analyst Recommendation: **[ACTION]**
 
-Next Review: [TIME]
+Next Review: [TIMEFRAME]
 
 ---
 
 Report ID: ${Date.now().toString(36).toUpperCase()}
+
 Classification: CONFIDENTIAL
 `;
 
   const completion = await client.chat.completions.create({
     model: "qwen/qwen3-32b",
-    messages: [{ role: "user", content: prompt }],
+    messages: [
+      {
+        role: "user",
+        content: prompt,
+      },
+    ],
   });
 
   return completion.choices?.[0]?.message?.content || "No response";
