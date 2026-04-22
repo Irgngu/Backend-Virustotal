@@ -11,8 +11,13 @@ import { checkIP, getLocationFallback } from "./abuseipdb.js";
 import { generateReportAI } from "./qwen3.js";
 
 import { searchMISP } from "./misp.js";
-
+import { 
+  generateMitigation,
+  calculateConfidence,
+  mapToMITRE
+} from "./mitigation.js";
 import exportRoute from "./routes/export.js";
+
 
 const app = new Hono();
 
@@ -103,6 +108,34 @@ app.post("/chat", async (c) => {
     const totalReports = abuseData.totalReports || 0;
 
     const totalVendors = malicious + suspicious + harmless + undetected;
+    /* ===============================
+      🔥 NORMALIZATION (NEW)
+    ================================ */
+    const normalized = {
+      type,
+      vt_score: malicious,
+      vt_total: totalVendors,
+      abuse_score: abuseScore,
+      misp_confidence: mispData?.confidence || "Low",
+      tags: mispData?.tags || []
+    };
+
+        /* ===============================
+      🔥 MITIGATION + CONFIDENCE (NEW)
+    ================================ */
+    const confidence = calculateConfidence(normalized);
+    const mitre = mapToMITRE(normalized);
+    const mitigationActions = generateMitigation(normalized);
+
+    /* ===============================
+      🔥 EXPLAINABILITY (NEW)
+    ================================ */
+    const reasoning = [
+      `VT detections: ${malicious}/${totalVendors}`,
+      `Abuse score: ${abuseScore}%`,
+      `MISP confidence: ${mispData?.confidence || "Low"}`
+    ].join("\n");
+
 
     /* Correlation */
     const correlationInsights = [
@@ -132,6 +165,10 @@ app.post("/chat", async (c) => {
       vtData: vt,
       abuseData,
       mispData,
+      mitigationActions,
+      confidence,
+      mitre,
+      reasoning
     });
   } catch (err) {
     console.error(err);

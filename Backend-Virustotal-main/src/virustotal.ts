@@ -39,13 +39,7 @@ export async function fetchVirusTotal(indicator: string, type: string) {
   }));
 
   const threatLevel =
-    stats.malicious >= 10
-      ? "CRITICAL"
-      : stats.malicious > 0
-        ? "HIGH"
-        : stats.suspicious > 0
-          ? "MEDIUM"
-          : "LOW";
+    stats.malicious >= 10 ? "CRITICAL" : stats.malicious > 0 ? "HIGH" : stats.suspicious > 0 ? "MEDIUM" : "LOW";
 
   return {
     indicator,
