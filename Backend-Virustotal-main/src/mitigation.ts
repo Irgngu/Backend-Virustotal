@@ -1,95 +1,111 @@
-// src/mitigation.ts
+import fetch from "node-fetch";
 
-export interface NormalizedData {
+const MITRE_URL =
+  "https://raw.githubusercontent.com/mitre/cti/master/enterprise-attack/enterprise-attack.json";
+
+interface MitreObject {
+  id: string;
   type: string;
-  vt_score: number;
-  vt_total: number;
-  abuse_score: number;
-  misp_confidence: string;
-  tags?: string[];
+  name?: string;
+  description?: string;
+  external_references?: {
+    source_name: string;
+    external_id?: string;
+  }[];
+  source_ref?: string;
+  target_ref?: string;
+  relationship_type?: string;
 }
 
-// 🔥 Confidence Scoring
-export function calculateConfidence(data: NormalizedData): number {
+let cache: MitreObject[] | null = null;
+
+export async function loadMitreData(): Promise<MitreObject[]> {
+  if (cache) return cache;
+
+  const res = await fetch(MITRE_URL);
+  const data: any = await res.json();
+
+  cache = data.objects;
+  return cache!; // ✅ FIX
+}
+
+// ✅ Ambil technique berdasarkan kode (T1059, dll)
+export async function getTechniqueByCode(code: string) {
+  const objects = await loadMitreData();
+
+  return objects.find(
+    (obj) =>
+      obj.type === "attack-pattern" &&
+      obj.external_references?.some(
+        (ref) => ref.external_id === code
+      )
+  );
+}
+
+// ✅ Ambil mitigation dari technique
+export async function getMitigationsByTechnique(code: string) {
+  const objects = await loadMitreData();
+
+  const technique = await getTechniqueByCode(code);
+  if (!technique) return [];
+
+  const relationships = objects.filter(
+    (obj) =>
+      obj.type === "relationship" &&
+      obj.relationship_type === "mitigates" &&
+      obj.target_ref === technique.id
+  );
+
+  const mitigations = relationships
+    .map((rel) =>
+      objects.find(
+        (obj) =>
+          obj.id === rel.source_ref &&
+          obj.type === "course-of-action"
+      )
+    )
+    .filter(Boolean);
+
+  return mitigations;
+}
+
+// ===============================
+// 🔥 CONFIDENCE CALCULATION
+// ===============================
+export function calculateConfidence(data: any): string {
   let score = 0;
 
-  score += (data.vt_score / Math.max(data.vt_total, 1)) * 40;
-  score += (data.abuse_score / 100) * 30;
+  score += data.vt_score || 0;
+  score += data.abuse_score || 0;
 
   if (data.misp_confidence === "High") score += 30;
   else if (data.misp_confidence === "Medium") score += 15;
 
-  return Math.min(score, 100);
+  if (score >= 80) return "High";
+  if (score >= 40) return "Medium";
+  return "Low";
 }
 
-// 🔥 MITRE Mapping
-export function mapToMITRE(data: NormalizedData) {
-  if (data.tags?.includes("c2")) {
-    return { technique: "T1071", name: "Command & Control" };
+// ===============================
+// 🔥 MAP TO MITRE TECHNIQUE
+// ===============================
+export function mapToMITRE(data: any): string | null {
+
+  // 🔴 Brute force / scanning (IP abuse tinggi)
+  if (data.type === "ip" && data.abuse_score > 50) {
+    return "T1110"; // Brute Force
   }
 
-  if (data.type === "ip" && data.abuse_score > 70) {
-    return { technique: "T1595", name: "Active Scanning" };
+  // 🔴 Phishing dari MISP tag
+  if (data.tags?.some((t: string) => t.toLowerCase().includes("phishing"))) {
+    return "T1566";
   }
 
-  if (data.tags?.includes("malware")) {
-    return { technique: "T1204", name: "User Execution" };
+  // 🔴 Malware / script execution
+  if (data.vt_score > 5) {
+    return "T1059";
   }
 
+  // 🔴 fallback
   return null;
-}
-
-// 🔥 Mitigation Mapping
-const mitigationMap: Record<string, string[]> = {
-  T1071: [
-    "Block outbound command-and-control traffic",
-    "Monitor DNS queries for anomalies",
-    "Deploy EDR to detect beaconing"
-  ],
-  T1595: [
-    "Block scanning IP at firewall",
-    "Enable IDS/IPS for reconnaissance detection",
-    "Monitor repeated connection attempts"
-  ],
-  T1204: [
-    "Restrict execution of unknown files",
-    "Enable application whitelisting",
-    "Use sandboxing for suspicious files"
-  ]
-};
-
-// 🔥 Final Generator
-export function generateMitigation(data: NormalizedData): string[] {
-  const confidence = calculateConfidence(data);
-  const mitre = mapToMITRE(data);
-
-  // 🔥 Anti false-positive
-  if (confidence < 40) {
-    return ["Monitor only — low confidence indicator"];
-  }
-
-  let actions: string[] = [];
-
-  if (confidence > 70) {
-    actions.push("Immediately block the indicator across security controls");
-  }
-
-  if (confidence > 50) {
-    actions.push("Conduct forensic investigation on affected systems");
-  }
-
-  if (mitre) {
-  actions.push(`[${mitre.technique}] ${mitre.name}`);
-
-  const mitreActions = mitigationMap[mitre.technique] || [];
-  actions.push(...mitreActions);
-  }
-  
-  actions.push(
-    "Update threat intelligence feeds",
-    "Monitor logs for related activity",
-    "Document findings and escalate if needed"
-  );
-
-  return actions;
 }

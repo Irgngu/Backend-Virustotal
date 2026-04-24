@@ -12,9 +12,9 @@ import { generateReportAI } from "./qwen3.js";
 
 import { searchMISP } from "./misp.js";
 import { 
-  generateMitigation,
   calculateConfidence,
-  mapToMITRE
+  mapToMITRE,
+  getMitigationsByTechnique
 } from "./mitigation.js";
 import exportRoute from "./routes/export.js";
 
@@ -124,8 +124,21 @@ app.post("/chat", async (c) => {
       🔥 MITIGATION + CONFIDENCE (NEW)
     ================================ */
     const confidence = calculateConfidence(normalized);
-    const mitre = mapToMITRE(normalized);
-    const mitigationActions = generateMitigation(normalized);
+
+    // 🔥 mapping ke technique (T-code)
+    const mitreTechnique = mapToMITRE(normalized);
+
+    // 🔥 ambil mitigation dari MITRE ATT&CK
+    let mitreMitigations: any[] = [];
+
+    if (mitreTechnique) {
+      mitreMitigations = await getMitigationsByTechnique(mitreTechnique);
+    }
+
+    // 🔥 fallback sederhana kalau kosong
+    const fallbackMitigation = mitreMitigations.length
+      ? []
+      : ["No MITRE mitigation found, use general security best practices"];
 
     /* ===============================
       🔥 EXPLAINABILITY (NEW)
@@ -165,9 +178,10 @@ app.post("/chat", async (c) => {
       vtData: vt,
       abuseData,
       mispData,
-      mitigationActions,
       confidence,
-      mitre,
+      mitreTechnique,
+      mitreMitigations,
+      fallbackMitigation,
       reasoning
     });
   } catch (err) {
