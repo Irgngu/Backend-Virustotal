@@ -15,7 +15,11 @@ import { fetchVirusTotal } from "./services/virustotal.js";
 import { checkIP, getLocationFallback } from "./services/abuseipdb.js";
 import { generateReportAI } from "./services/qwen3.js";
 import { searchMISP } from "./services/misp.js";
-
+import {
+  calculateConfidence,
+  mapToMITRE,
+  getMitigationsByTechnique,
+} from "./services/mitigation.js";
 /* ===============================
    CORE
 ============================== */
@@ -248,6 +252,46 @@ app.post("/chat", async (c) => {
         console.log("KEV skipped");
       }
     }
+    /* ===============================
+      🔥 NORMALIZATION (NEW)
+    ================================ */
+    const normalized = {
+      type,
+      vt_score: malicious,
+      vt_total: totalVendors,
+      abuse_score: abuseScore,
+      misp_confidence: mispData?.confidence || "Low",
+      tags: mispData?.tags || [],
+    };
+
+    /* ===============================
+      🔥 MITIGATION + CONFIDENCE (NEW)
+    ================================ */
+    const confidence = calculateConfidence(normalized);
+
+    // 🔥 mapping ke technique (T-code)
+    const mitreTechnique = mapToMITRE(normalized);
+
+    // 🔥 ambil mitigation dari MITRE ATT&CK
+    let mitreMitigations: any[] = [];
+
+    if (mitreTechnique) {
+      mitreMitigations = await getMitigationsByTechnique(mitreTechnique);
+    }
+
+    // 🔥 fallback sederhana kalau kosong
+    const fallbackMitigation = mitreMitigations.length
+      ? []
+      : ["No MITRE mitigation found, use general security best practices"];
+
+    /* ===============================
+      🔥 EXPLAINABILITY (NEW)
+    ================================ */
+    const reasoning = [
+      `VT detections: ${malicious}/${totalVendors}`,
+      `Abuse score: ${abuseScore}%`,
+      `MISP confidence: ${mispData?.confidence || "Low"}`,
+    ].join("\n");
 
     /* ===============================
        CORRELATION ENGINE
@@ -310,6 +354,11 @@ app.post("/chat", async (c) => {
       nvdData,
       kevData,
       censysData,
+      confidence,
+      mitreTechnique,
+      mitreMitigations,
+      fallbackMitigation,
+      reasoning,
     });
   } catch (err) {
     console.error(err);
