@@ -11,10 +11,9 @@ import { checkIP, getLocationFallback } from "./abuseipdb.js";
 import { generateReportAI } from "./qwen3.js";
 
 import { searchMISP } from "./misp.js";
-import { 
+import {
   calculateConfidence,
-  mapToMITRE,
-  getMitigationsByTechnique
+  analyzeThreatToMitigation
 } from "./mitigation.js";
 import exportRoute from "./routes/export.js";
 
@@ -65,99 +64,154 @@ app.post("/misp/search", async (c) => {
 /* ===============================
    MAIN ANALYZE
 ================================ */
+// ================================================================
+// FULL REPLACEMENT for the POST /chat handler in index.ts
+// Replace everything from `app.post("/chat", async (c) => {`
+// to its closing `});`
+// ================================================================
+
 app.post("/chat", async (c) => {
   try {
     const { indicator, type } = await c.req.json();
 
     if (!indicator || !type) {
-      return c.json(
-        {
-          error: "indicator & type required",
-        },
-        400,
-      );
+      return c.json({ error: "indicator & type required" }, 400);
     }
 
-    /* VT */
-    const vt = await fetchVirusTotal(indicator, type);
+    /* ── 1. Fetch all sources in parallel ── */
+    const [vt, mispData] = await Promise.all([
+      fetchVirusTotal(indicator, type),
+      searchMISP(indicator),
+    ]);
 
-    /* Abuse */
     let abuse = null;
-
     if (type === "ip") {
       abuse = await checkIP(indicator);
     }
 
-    const abuseData = abuse?.data || {};
+    const abuseData = abuse?.data ?? {};
 
-    /* MISP */
-    const mispData = await searchMISP(indicator);
-
-    const stats = vt.stats || {};
-
-    const malicious = stats.malicious || 0;
-
-    const suspicious = stats.suspicious || 0;
-
-    const harmless = stats.harmless || 0;
-
-    const undetected = stats.undetected || 0;
-
-    const abuseScore = abuseData.abuseConfidenceScore || 0;
-
-    const totalReports = abuseData.totalReports || 0;
-
+    /* ── 2. Build stats ── */
+    const stats       = vt.stats ?? {};
+    const malicious   = stats.malicious   ?? 0;
+    const suspicious  = stats.suspicious  ?? 0;
+    const harmless    = stats.harmless    ?? 0;
+    const undetected  = stats.undetected  ?? 0;
+    const abuseScore  = abuseData.abuseConfidenceScore ?? 0;
+    const totalReports = abuseData.totalReports ?? 0;
     const totalVendors = malicious + suspicious + harmless + undetected;
-    /* ===============================
-      🔥 NORMALIZATION (NEW)
-    ================================ */
+
+    // ===============================
+    // 🔥 SEVERITY CLASSIFICATION
+    // ===============================
+    const severity =
+      malicious >= 15 || abuseScore >= 80
+        ? "Critical"
+        : malicious >= 8 || abuseScore >= 50
+        ? "High"
+        : malicious >= 3
+        ? "Medium"
+        : "Low";
+
+    /* ── 3. Normalize for pipeline ── */
+    // ===============================
+// Extract VT intelligence tags
+// ===============================
+
+    const vtTags: string[] = [];
+
+    // ambil kategori/community tags VT
+    if (vt.vendors && Array.isArray(vt.vendors)) {
+      vt.vendors.forEach((vendor: any) => {
+        const result =
+          vendor.result?.toLowerCase?.() || "";
+
+        const category =
+          vendor.category?.toLowerCase?.() || "";
+
+        if (
+          result.includes("phish") ||
+          category.includes("phish")
+        ) {
+          vtTags.push("phishing");
+        }
+
+        // trojan / malware
+        if (
+          result.includes("trojan") ||
+          result.includes("malware")
+        ) {
+          vtTags.push("trojan");
+        }
+
+        // botnet / c2
+        if (
+          result.includes("botnet") ||
+          result.includes("c2")
+        ) {
+          vtTags.push("c2");
+        }
+
+        // ransomware
+        if (
+          result.includes("ransom")
+        ) {
+          vtTags.push("ransomware");
+        }
+      });
+    }
+
+    // gabungkan semua tags
+    const mergedTags = [
+      ...(mispData?.tags ?? []),
+      ...vtTags,
+    ];
+
+    // remove duplicate
+    const uniqueTags = [...new Set(mergedTags)];
+
+    // ===============================
+    // Normalize
+    // ===============================
+
     const normalized = {
       type,
       vt_score: malicious,
       vt_total: totalVendors,
       abuse_score: abuseScore,
-      misp_confidence: mispData?.confidence || "Low",
-      tags: mispData?.tags || []
+      misp_confidence:
+        (mispData?.confidence ?? "Low") as
+          | "High"
+          | "Medium"
+          | "Low",
+
+      tags: uniqueTags,
     };
 
-        /* ===============================
-      🔥 MITIGATION + CONFIDENCE (NEW)
-    ================================ */
-    const confidence = calculateConfidence(normalized);
+    /* ── 4. CTI pipeline ── */
+    const confidence   = calculateConfidence(normalized);
+    const threatIntel  = await analyzeThreatToMitigation(normalized);
 
-    // 🔥 mapping ke technique (T-code)
-    const mitreTechnique = mapToMITRE(normalized);
+    // ✅ mitreMitigations is the full MitigationAction[] array
+    const mitreMitigations = threatIntel.mitigations ?? [];
 
-    // 🔥 ambil mitigation dari MITRE ATT&CK
-    let mitreMitigations: any[] = [];
+    const mitreTechnique = threatIntel.primaryTechnique;
+    const mitreName      = threatIntel.primaryTechniqueName;
 
-    if (mitreTechnique) {
-      mitreMitigations = await getMitigationsByTechnique(mitreTechnique);
-    }
-
-    // 🔥 fallback sederhana kalau kosong
-    const fallbackMitigation = mitreMitigations.length
-      ? []
-      : ["No MITRE mitigation found, use general security best practices"];
-
-    /* ===============================
-      🔥 EXPLAINABILITY (NEW)
-    ================================ */
+    /* ── 5. Explainability ── */
     const reasoning = [
       `VT detections: ${malicious}/${totalVendors}`,
       `Abuse score: ${abuseScore}%`,
-      `MISP confidence: ${mispData?.confidence || "Low"}`
+      `MISP confidence: ${mispData?.confidence ?? "Low"}`,
     ].join("\n");
 
-
-    /* Correlation */
     const correlationInsights = [
       `VirusTotal flagged ${malicious} malicious detections`,
       `AbuseIPDB score ${abuseScore}% with ${totalReports} reports`,
-      `MISP matched ${mispData.matchCount} threat events`,
+      `MISP matched ${mispData?.matchCount ?? 0} threat events`,
     ].join("\n");
 
-    /* AI Report */
+    /* ── 6. AI report ── */
     const aiAnalysis = await generateReportAI({
       type,
       indicator,
@@ -171,28 +225,42 @@ app.post("/chat", async (c) => {
       correlationInsights,
     });
 
+    /* ── 7. Debug log ── */
+    console.log("CTI PIPELINE →", {
+      technique:         mitreTechnique,
+      techniqueName:     mitreName,
+      mitigationCount:   mitreMitigations.length,
+      mitigationNames:   mitreMitigations.map((m) => m.name),
+    });
+
+    /* ── 8. Return ── */
     return c.json({
       success: true,
+      severity,
       aiAnalysis,
       correlationInsights,
-      vtData: vt,
+      vtData:   vt,
       abuseData,
       mispData,
       confidence,
-      mitreTechnique,
+      reasoning,
+      cve: threatIntel.cve,
+      cwe: threatIntel.cwe,
+
+      // ✅ KEY FIX: send full mitigation objects — this key was MISSING before
       mitreMitigations,
-      fallbackMitigation,
-      reasoning
+
+      // ✅ Flat string for the frontend badge/label
+      mitreTechnique,
+      mitreTechniqueName: mitreName,
+
+      // String array for any legacy consumers
+      mitigationActions: mitreMitigations.map((m) => m.name),
     });
+
   } catch (err) {
     console.error(err);
-
-    return c.json(
-      {
-        error: "Failed generate report",
-      },
-      500,
-    );
+    return c.json({ error: "Failed to generate report" }, 500);
   }
 });
 /* ===============================
