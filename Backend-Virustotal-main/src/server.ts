@@ -17,8 +17,7 @@ import { generateReportAI } from "./services/qwen3.js";
 import { searchMISP } from "./services/misp.js";
 import {
   calculateConfidence,
-  mapToMITRE,
-  getMitigationsByTechnique,
+  analyzeThreatToMitigation,
 } from "./services/mitigation.js";
 /* ===============================
    CORE
@@ -31,15 +30,6 @@ import { generateCorrelationInsights } from "./core/correlation.js";
 import exportRoute from "./routes/export.js";
 import nvdRoute from "./routes/nvd.js";
 
-import kevRoute from "./routes/kev.js";
-import censysRoute from "./routes/censys.js";
-// import correlationRoute from "./routes/correlation.js";
-
-/* ===============================
-   UTILS
-============================== */
-import { getProductInfo } from "./utils/vendorMap.js";
-// console.log("CENSYS PAT:", process.env.CENSYS_PAT);
 /* ===============================
    APP
 ============================== */
@@ -52,10 +42,6 @@ app.use("*", cors());
 ============================== */
 app.route("/api", exportRoute);
 app.route("/api/nvd", nvdRoute);
-
-app.route("/api/kev", kevRoute);
-app.route("/api/censys", censysRoute);
-// app.route("/api/correlation", correlationRoute);
 
 /* ===============================
    ROOT
@@ -147,142 +133,84 @@ app.post("/chat", async (c) => {
 
     const totalReports = abuseData.totalReports || 0;
 
-    /* ===============================
-       PRODUCT / VERSION / CENSYS
-    ============================== */
-    let detectedProduct = null;
-    let detectedVersion = null;
-
-    let productInfo = null;
-
     let nvdData = null;
-    let kevData = null;
-    let censysData = null;
+    // ===============================
+    // 🔥 SEVERITY CLASSIFICATION
+    // ===============================
+    const severity =
+      malicious >= 15 || abuseScore >= 80
+        ? "Critical"
+        : malicious >= 8 || abuseScore >= 50
+          ? "High"
+          : malicious >= 3
+            ? "Medium"
+            : "Low";
 
-    /* ===============================
-   IOC LOOKUP (CENSYS ONLY)
-============================== */
+    // Extract VT intelligence tags
+    // ===============================
 
-    if (type === "ip") {
-      try {
-        const censysRes = await fetch(
-          `http://localhost:${process.env.PORT || 5000}/api/censys/${indicator}`,
-        );
+    const vtTags: string[] = [];
 
-        censysData = await censysRes.json();
+    // ambil kategori/community tags VT
+    if (vt.vendors && Array.isArray(vt.vendors)) {
+      vt.vendors.forEach((vendor: any) => {
+        const result = vendor.result?.toLowerCase?.() || "";
 
-        if (censysData?.error) {
-          censysData = null;
+        const category = vendor.category?.toLowerCase?.() || "";
+
+        if (result.includes("phish") || category.includes("phish")) {
+          vtTags.push("phishing");
         }
 
-        const firstService = censysData?.services?.[0];
-
-        const firstSoftware = firstService?.software?.[0];
-
-        detectedProduct = firstSoftware?.product || null;
-
-        detectedVersion = firstSoftware?.version || null;
-
-        if (detectedProduct) {
-          productInfo = getProductInfo(
-            `${detectedProduct} ${detectedVersion || ""}`,
-          );
-        } else {
-          productInfo = getProductInfo(indicator);
-        }
-      } catch (e) {
-        console.log("Censys skipped");
-
-        productInfo = getProductInfo(indicator);
-      }
-    } else {
-      productInfo = getProductInfo(indicator);
-
-      try {
-        const censysRes = await fetch(
-          `http://localhost:${process.env.PORT || 5000}/api/censys/${indicator}`,
-        );
-
-        censysData = await censysRes.json();
-
-        if (censysData?.error) {
-          censysData = null;
+        // trojan / malware
+        if (result.includes("trojan") || result.includes("malware")) {
+          vtTags.push("trojan");
         }
 
-        const firstService = censysData?.services?.[0];
+        // botnet / c2
+        if (result.includes("botnet") || result.includes("c2")) {
+          vtTags.push("c2");
+        }
 
-        const firstSoftware = firstService?.software?.[0];
-
-        detectedProduct = firstSoftware?.product || null;
-
-        detectedVersion = firstSoftware?.version || null;
-      } catch (e) {
-        console.log("Censys skipped");
-      }
+        // ransomware
+        if (result.includes("ransom")) {
+          vtTags.push("ransomware");
+        }
+      });
     }
 
-    /* ===============================
-       NVD SEARCH
-    ============================== */
-    if (productInfo?.keyword) {
-      try {
-        const nvdRes = await fetch(
-          `http://localhost:${process.env.PORT || 5000}/api/nvd?keyword=${encodeURIComponent(productInfo.keyword)}`,
-        );
+    // gabungkan semua tags
+    const mergedTags = [...(mispData?.tags ?? []), ...vtTags];
 
-        nvdData = await nvdRes.json();
-      } catch (e) {
-        console.log("NVD skipped");
-      }
-    }
+    // remove duplicate
+    const uniqueTags = [...new Set(mergedTags)];
 
-    /* ===============================
-       KEV CHECK
-    ============================== */
-    const firstCve = nvdData?.vulnerabilities?.[0]?.cve?.id;
+    // ===============================
+    // Normalize
+    // ===============================
 
-    if (firstCve) {
-      try {
-        const kevRes = await fetch(
-          `http://localhost:${process.env.PORT || 5000}/api/kev?cve=${firstCve}`,
-        );
-
-        kevData = await kevRes.json();
-      } catch (e) {
-        console.log("KEV skipped");
-      }
-    }
-    /* ===============================
-      🔥 NORMALIZATION (NEW)
-    ================================ */
     const normalized = {
       type,
       vt_score: malicious,
       vt_total: totalVendors,
       abuse_score: abuseScore,
-      misp_confidence: mispData?.confidence || "Low",
-      tags: mispData?.tags || [],
+      misp_confidence: (mispData?.confidence ?? "Low") as
+        | "High"
+        | "Medium"
+        | "Low",
+
+      tags: uniqueTags,
     };
 
-    /* ===============================
-      🔥 MITIGATION + CONFIDENCE (NEW)
-    ================================ */
+    /* ── 4. CTI pipeline ── */
     const confidence = calculateConfidence(normalized);
+    const threatIntel = await analyzeThreatToMitigation(normalized);
 
-    // 🔥 mapping ke technique (T-code)
-    const mitreTechnique = mapToMITRE(normalized);
+    // ✅ mitreMitigations is the full MitigationAction[] array
+    const mitreMitigations = threatIntel.mitigations ?? [];
 
-    // 🔥 ambil mitigation dari MITRE ATT&CK
-    let mitreMitigations: any[] = [];
-
-    if (mitreTechnique) {
-      mitreMitigations = await getMitigationsByTechnique(mitreTechnique);
-    }
-
-    // 🔥 fallback sederhana kalau kosong
-    const fallbackMitigation = mitreMitigations.length
-      ? []
-      : ["No MITRE mitigation found, use general security best practices"];
+    const mitreTechnique = threatIntel.primaryTechnique;
+    const mitreName = threatIntel.primaryTechniqueName;
 
     /* ===============================
       🔥 EXPLAINABILITY (NEW)
@@ -312,25 +240,15 @@ app.post("/chat", async (c) => {
     const aiAnalysis = await generateReportAI({
       type,
       indicator,
-
       malicious,
       suspicious,
       harmless,
       undetected,
-
       abuseScore,
       totalReports,
       totalVendors,
-
       mispData,
       nvdData,
-      kevData,
-
-      detectedProduct,
-      detectedVersion,
-
-      censysData,
-
       correlationInsights,
     });
 
@@ -339,26 +257,21 @@ app.post("/chat", async (c) => {
     ============================== */
     return c.json({
       success: true,
-
+      severity,
       aiAnalysis,
       correlationInsights,
-
       vtData: vt,
       abuseData,
       mispData,
-
-      detectedProduct,
-      detectedVersion,
-      productInfo,
-
-      nvdData,
-      kevData,
-      censysData,
       confidence,
-      mitreTechnique,
-      mitreMitigations,
-      fallbackMitigation,
       reasoning,
+      cve: threatIntel.cve,
+      cwe: threatIntel.cwe,
+      mitreMitigations,
+      mitreTechnique,
+      mitreTechniqueName: mitreName,
+      mitigationActions: mitreMitigations.map((m) => m.name),
+      nvdData,
     });
   } catch (err) {
     console.error(err);
