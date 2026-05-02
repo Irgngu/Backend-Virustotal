@@ -1,0 +1,190 @@
+export async function fetchVirusTotal(indicator: string, type: string) {
+  const API_KEY = process.env.VT_API_KEY;
+
+  let endpoint = "";
+
+  if (type === "ip") {
+    endpoint = `ip_addresses/${indicator}`;
+  } else if (type === "domain") {
+    endpoint = `domains/${indicator}`;
+  } else if (type === "url") {
+    endpoint = `urls/${indicator}`;
+  } else {
+    endpoint = `files/${indicator}`;
+  }
+
+  const res = await fetch(`https://www.virustotal.com/api/v3/${endpoint}`, {
+    headers: {
+      "x-apikey": API_KEY!,
+    },
+  });
+
+  if (!res.ok) {
+    throw new Error(`VirusTotal API error: ${res.status}`);
+  }
+
+  const json = await res.json();
+  const attr = json.data.attributes;
+
+  // ── sudah ada ──────────────────────────────────────────────
+  const stats = attr.last_analysis_stats;
+  const results = attr.last_analysis_results;
+
+  // 🔥 ubah jadi array biar gampang dipakai
+  const vendors = Object.entries(results).map(([vendor, value]: any) => ({
+    vendor,
+    category: value.category,
+    result: value.result,
+  }));
+  const total =
+    stats.malicious + stats.suspicious + stats.harmless + stats.undetected;
+
+  const threatLevel =
+    stats.malicious >= 10 ? "CRITICAL" : stats.malicious > 0 ? "HIGH" : stats.suspicious > 0 ? "MEDIUM" : "LOW";
+
+// ── BARU: metadata file ────────────────────────────────────
+  const hash = json.data.id ?? indicator;
+  const meaningfulName = attr.meaningful_name ?? attr.name ?? null;
+  const typeDescription = attr.type_description ?? null;
+  const fileSize = attr.size ?? null;
+
+  // ── BARU: detection summary ────────────────────────────────
+  const detectionRate =
+    total > 0 ? ((stats.malicious / total) * 100).toFixed(2) + "%" : "0%";
+
+  // ── BARU: popular threat classification ───────────────────
+  const popularThreatCategory =
+    attr.popular_threat_classification?.popular_threat_category?.[0]?.value ??
+    null;
+  const popularThreatNames: string[] =
+    attr.popular_threat_classification?.popular_threat_name?.map(
+      (t: any) => t.value
+    ) ?? [];
+
+  // ── BARU: tags ─────────────────────────────────────────────
+  const tags: string[] = attr.tags ?? [];
+
+  // ── BARU: behavior summary (hanya tersedia di endpoint /files/{hash}/behaviours) ──
+  // Perlu request tambahan khusus untuk file hash
+  let behaviorSummary = null;
+  if (type === "file" || type === "hash") {
+    const behaviorRes = await fetch(
+      `https://www.virustotal.com/api/v3/files/${indicator}/behaviours`,
+      { headers: { "x-apikey": API_KEY! } }
+    );
+
+    if (behaviorRes.ok) {
+      const behaviorJson = await behaviorRes.json();
+      // Agregasi dari semua sandbox yang tersedia
+      const sandboxes = behaviorJson.data ?? [];
+
+      const networkCommunications = new Set<string>();
+      const dropsFiles: string[] = [];
+      const registryModifications: string[] = [];
+      const processesCreated: string[] = [];
+      let filesEncrypted = false;
+      let mutexCreated: string | null = null;
+
+      for (const sandbox of sandboxes) {
+        const b = sandbox.attributes;
+
+        // Network
+        b?.network_protocols?.forEach((p: string) =>
+          networkCommunications.add(p)
+        );
+        b?.dns_lookups?.forEach((d: any) => {
+          if (d.hostname) networkCommunications.add(d.hostname);
+        });
+
+        // Files dropped
+        b?.files_dropped?.forEach((f: any) => {
+          if (f.path) dropsFiles.push(f.path.split("\\").pop());
+        });
+
+        // Registry
+        b?.registry_keys_set?.forEach((r: any) => {
+          if (r.key) registryModifications.push(r.key);
+        });
+
+        // Processes
+        b?.processes_created?.forEach((p: string) => processesCreated.push(p));
+        b?.command_executions?.forEach((c: string) =>
+          processesCreated.push(c)
+        );
+
+        // Mutex
+        if (!mutexCreated && b?.mutexes_created?.[0]) {
+          mutexCreated = b.mutexes_created[0];
+        }
+
+        // Files encrypted — tandai jika ada ekstensi .wncry / .wnry atau serupa
+        if (
+          b?.files_dropped?.some(
+            (f: any) =>
+              f.path?.includes(".wncry") || f.path?.includes(".wnry")
+          )
+        ) {
+          filesEncrypted = true;
+        }
+      }
+
+      behaviorSummary = {
+        network_communications: [...networkCommunications],
+        files_encrypted: filesEncrypted,
+        drops_files: [...new Set(dropsFiles)],
+        registry_modifications: [...new Set(registryModifications)],
+        processes_created: [...new Set(processesCreated)],
+        mutex_created: mutexCreated,
+      };
+    }
+  }
+
+  // ── BARU: sigma rules ──────────────────────────────────────
+  // Diambil dari crowdsourced_ids_results (tersedia di respons utama)
+  const sigmaResults: { rule_id: string; rule_title: string; severity: string }[] = [];
+  const sigmaRaw = attr.crowdsourced_ids_results ?? [];
+  for (const rule of sigmaRaw) {
+    sigmaResults.push({
+      rule_id: rule.rule_id ?? "",
+      rule_title: rule.rule_msg ?? "",
+      severity: rule.alert_severity?.toUpperCase() ?? "INFO",
+    });
+  }
+
+  // ── BARU: CVE extraction dari tags ────────────────────────
+  const cveExtracted = tags.filter((t) => /^CVE-\d{4}-\d+$/i.test(t));
+
+  return {
+    indicator,
+    type,
+    threatLevel,
+    stats,
+    total,
+    virustotal: {
+      hash,
+      meaningful_name: meaningfulName,
+      type_description: typeDescription,
+      file_size: fileSize,
+
+      detection_summary: {
+        malicious: stats.malicious,
+        suspicious: stats.suspicious,
+        harmless: stats.harmless,
+        undetected: stats.undetected,
+        total_vendors: total,
+        detection_rate: detectionRate,
+      },
+
+      popular_threat_classification: {
+        popular_threat_category: popularThreatCategory,
+        popular_threat_name: popularThreatNames,
+      },
+
+      tags,
+      behavior_summary: behaviorSummary,
+      sigma_analysis_results: sigmaResults,
+      cve_extracted: cveExtracted,
+    },
+    vendors,
+  };
+}
