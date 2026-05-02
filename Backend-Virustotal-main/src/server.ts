@@ -12,13 +12,19 @@ import net from "net";
    SERVICES
 ============================== */
 import { fetchVirusTotal } from "./services/virustotal.js";
-import { checkIP, getLocationFallback } from "./services/abuseipdb.js";
+import { getAbuseIPDB, getLocationFallback } from "./services/abuseipdb.js";
 import { generateReportAI } from "./services/qwen3.js";
 import { searchMISP } from "./services/misp.js";
 import {
   calculateConfidence,
   analyzeThreatToMitigation,
 } from "./services/mitigation.js";
+import {
+  matchCVE,
+  calculateCVERiskScore,
+  type CVEMatchResult,
+  type CVERiskScore,
+} from "./services/cve.js";
 /* ===============================
    CORE
 ============================== */
@@ -85,12 +91,7 @@ app.post("/chat", async (c) => {
     const { indicator, type } = await c.req.json();
 
     if (!indicator || !type) {
-      return c.json(
-        {
-          error: "indicator & type required",
-        },
-        400,
-      );
+      return c.json({ error: "indicator & type required" }, 400);
     }
 
     /* ===============================
@@ -101,13 +102,11 @@ app.post("/chat", async (c) => {
     /* ===============================
        ABUSEIPDB
     ============================== */
-    let abuse = null;
+    let abuseipdb = null;
 
     if (type === "ip") {
-      abuse = await checkIP(indicator);
+      abuseipdb = await getAbuseIPDB(indicator);
     }
-
-    const abuseData = abuse?.data || {};
 
     /* ===============================
        MISP
@@ -129,66 +128,77 @@ app.post("/chat", async (c) => {
 
     const totalVendors = malicious + suspicious + harmless + undetected;
 
-    const abuseScore = abuseData.abuseConfidenceScore || 0;
+    const abuseScore = abuseipdb?.abuse_confidence_score || 0;
 
-    const totalReports = abuseData.totalReports || 0;
+    const totalReports = abuseipdb?.total_reports || 0;
 
     let nvdData = null;
-    // ===============================
-    // 🔥 SEVERITY CLASSIFICATION
-    // ===============================
+    /* ──────────────────────────────
+       5. CVE MATCHING (BARU)
+       Jalankan parallel dengan pipeline lain
+    ────────────────────────────── */
+    let cveMatches: CVEMatchResult[] = [];
+    let cveRiskScore: CVERiskScore = {
+      score: 0,
+      highest_cvss: 0,
+      critical_count: 0,
+      high_count: 0,
+      medium_count: 0,
+      exploit_count: 0,
+    };
+
+    try {
+      cveMatches = await matchCVE({ vtResult: vt, abuseipdb, mispData });
+      cveRiskScore = calculateCVERiskScore(cveMatches);
+      console.log(`[CVE] ${cveMatches.length} CVE(s) matched for ${indicator}`);
+    } catch (cveErr) {
+      // CVE matching adalah fitur tambahan — tidak boleh hentikan pipeline
+      console.warn("[CVE] matching failed (non-critical):", cveErr);
+    }
+
+    /* ──────────────────────────────
+       6. SEVERITY CLASSIFICATION
+       Mempertimbangkan CVE sekarang
+    ────────────────────────────── */
     const severity =
-      malicious >= 15 || abuseScore >= 80
+      malicious >= 15 || abuseScore >= 80 || cveRiskScore.critical_count > 0
         ? "Critical"
-        : malicious >= 8 || abuseScore >= 50
+        : malicious >= 8 || abuseScore >= 50 || cveRiskScore.high_count > 0
           ? "High"
-          : malicious >= 3
+          : malicious >= 3 || cveRiskScore.score > 40
             ? "Medium"
             : "Low";
 
-    // Extract VT intelligence tags
-    // ===============================
-
+    // ── VT TAGS (diperbarui) ──────────────────────────────────
     const vtTags: string[] = [];
 
-    // ambil kategori/community tags VT
+    // 🆕 Prioritaskan tags yang sudah diparse dari virustotal.ts
+    if (vt.virustotal?.tags && Array.isArray(vt.virustotal.tags)) {
+      vt.virustotal.tags.forEach((tag: string) => vtTags.push(tag));
+    }
+
+    // Scan vendors sebagai tambahan
     if (vt.vendors && Array.isArray(vt.vendors)) {
       vt.vendors.forEach((vendor: any) => {
         const result = vendor.result?.toLowerCase?.() || "";
-
         const category = vendor.category?.toLowerCase?.() || "";
 
-        if (result.includes("phish") || category.includes("phish")) {
+        if (result.includes("phish") || category.includes("phishing"))
           vtTags.push("phishing");
-        }
-
-        // trojan / malware
-        if (result.includes("trojan") || result.includes("malware")) {
+        if (result.includes("trojan") || result.includes("malware"))
           vtTags.push("trojan");
-        }
-
-        // botnet / c2
-        if (result.includes("botnet") || result.includes("c2")) {
+        if (result.includes("botnet") || result.includes("c2"))
           vtTags.push("c2");
-        }
-
-        // ransomware
-        if (result.includes("ransom")) {
-          vtTags.push("ransomware");
-        }
+        if (result.includes("ransom")) vtTags.push("ransomware");
       });
     }
 
-    // gabungkan semua tags
     const mergedTags = [...(mispData?.tags ?? []), ...vtTags];
-
-    // remove duplicate
     const uniqueTags = [...new Set(mergedTags)];
 
-    // ===============================
-    // Normalize
-    // ===============================
-
+    /* ──────────────────────────────
+       8. NORMALIZE → MITIGATION ENGINE
+    ────────────────────────────── */
     const normalized = {
       type,
       vt_score: malicious,
@@ -198,42 +208,39 @@ app.post("/chat", async (c) => {
         | "High"
         | "Medium"
         | "Low",
-
       tags: uniqueTags,
     };
 
-    /* ── 4. CTI pipeline ── */
     const confidence = calculateConfidence(normalized);
     const threatIntel = await analyzeThreatToMitigation(normalized);
 
-    // ✅ mitreMitigations is the full MitigationAction[] array
     const mitreMitigations = threatIntel.mitigations ?? [];
-
     const mitreTechnique = threatIntel.primaryTechnique;
     const mitreName = threatIntel.primaryTechniqueName;
 
-    /* ===============================
-      🔥 EXPLAINABILITY (NEW)
-    ================================ */
+    /* ──────────────────────────────
+       9. EXPLAINABILITY
+    ────────────────────────────── */
     const reasoning = [
       `VT detections: ${malicious}/${totalVendors}`,
       `Abuse score: ${abuseScore}%`,
       `MISP confidence: ${mispData?.confidence || "Low"}`,
+      `CVE matches: ${cveMatches.length} (risk score: ${cveRiskScore.score}/100)`,
     ].join("\n");
 
-    /* ===============================
-       CORRELATION ENGINE
-    ============================== */
+    /* ──────────────────────────────
+       10. CORRELATION ENGINE
+       Sekarang menerima cveMatches & cveRiskScore
+    ────────────────────────────── */
     const correlationInsights = generateCorrelationInsights({
       malicious,
       totalVendors,
       abuseScore,
       totalReports,
       mispData,
-      // nvdData,
-      // censysData,
+      cveMatches,
+      cveRiskScore,
     });
-
     /* ===============================
        AI REPORT
     ============================== */
@@ -261,7 +268,7 @@ app.post("/chat", async (c) => {
       aiAnalysis,
       correlationInsights,
       vtData: vt,
-      abuseData,
+      abuseipdb,
       mispData,
       confidence,
       reasoning,
@@ -272,16 +279,13 @@ app.post("/chat", async (c) => {
       mitreTechniqueName: mitreName,
       mitigationActions: mitreMitigations.map((m) => m.name),
       nvdData,
+      virusTotalIntel: vt.virustotal ?? null,
+      cveMatches,
+      cveRiskScore,
     });
   } catch (err) {
     console.error(err);
-
-    return c.json(
-      {
-        error: "Failed generate report",
-      },
-      500,
-    );
+    return c.json({ error: "Failed to generate report" }, 500);
   }
 });
 
@@ -345,9 +349,9 @@ app.post("/check-ip", async (c) => {
       );
     }
 
-    const dataAPI = await checkIP(ip);
+    const abuse = await getAbuseIPDB(ip);
 
-    if (!dataAPI || !dataAPI.data) {
+    if (!abuse) {
       return c.json(
         {
           error: "Gagal mengambil data dari AbuseIPDB",
@@ -356,19 +360,14 @@ app.post("/check-ip", async (c) => {
       );
     }
 
-    const api = dataAPI.data;
-
     const fallback = await getLocationFallback(ip);
 
-    const score = api.abuseConfidenceScore || 0;
+    const score = abuse.abuse_confidence_score || 0;
+    const reports = abuse.total_reports || 0;
 
-    const reports = api.totalReports || 0;
-
-    const country = api.countryCode || fallback?.country;
-
-    const city = api.city || fallback?.city;
-
-    const asn = api.asn || fallback?.org;
+    const country = abuse.country_code || fallback?.country;
+    const city = fallback?.city || "-";
+    const asn = fallback?.org || "Unknown";
 
     let status = "Aman";
 
@@ -385,10 +384,14 @@ app.post("/check-ip", async (c) => {
       status,
       country: country || "-",
       city: city || "-",
-      isp: api.isp || fallback?.org || "-",
-      usage_type: api.usageType || "-",
-      domain: api.domain || "-",
+      isp: abuse.isp || fallback?.org || "-",
+      usage_type: abuse.usage_type || "-",
+      domain: abuse.domain || "-",
       asn: asn || "Unknown",
+      numDistinctUsers: abuse.numDistinctUsers || 0,
+      last_reported_at: abuse.last_reported_at || null,
+      recent_reports: abuse.recent_reports || [],
+      abuse_categories: abuse.abuse_categories || [],
     });
   } catch (error) {
     console.error(error);
