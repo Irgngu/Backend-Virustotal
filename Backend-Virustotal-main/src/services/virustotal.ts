@@ -74,6 +74,7 @@ export async function fetchVirusTotal(indicator: string, type: string) {
     );
 
     if (behaviorRes.ok) {
+      
       const behaviorJson = await behaviorRes.json();
       // Agregasi dari semua sandbox yang tersedia
       const sandboxes = behaviorJson.data ?? [];
@@ -151,8 +152,64 @@ export async function fetchVirusTotal(indicator: string, type: string) {
     });
   }
 
-  // ── BARU: CVE extraction dari tags ────────────────────────
-  const cveExtracted = tags.filter((t) => /^CVE-\d{4}-\d+$/i.test(t));
+  // ── BARU: crowdsourced context (tersedia untuk IP, domain, file) ──
+  const crowdsourcedContext: {
+    rule_title: string;
+    rule_msg?: string;
+    severity: string;
+    source?: string;
+    cve?: string[];
+  }[] = [];
+
+  const rawContext = attr.crowdsourced_ids_results ?? [];
+  for (const ctx of rawContext) {
+    // ekstrak CVE dari rule_msg atau rule_raw jika ada
+    const cveMatches = (ctx.rule_msg ?? "").match(/CVE-\d{4}-\d{4,7}/gi) ?? [];
+    crowdsourcedContext.push({
+      rule_title: ctx.rule_msg ?? ctx.rule_id ?? "",
+      severity: ctx.alert_severity?.toUpperCase() ?? "INFO",
+      source: ctx.rule_source ?? null,
+      cve: cveMatches,
+    });
+  }
+
+  // ── BARU: crowdsourced_context khusus IP/domain ──
+  // Field ini berbeda dari crowdsourced_ids_results, khusus ada di IP & domain
+  const crowdsourcedContextRaw = attr.crowdsourced_context ?? [];
+  const crowdsourcedContextItems = crowdsourcedContextRaw.map((ctx: any) => {
+    const textBlob = [
+      ctx.detail,
+      ctx.title,
+      ctx.message,
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    const cveMatches = textBlob.match(/CVE-\d{4}-\d{4,7}/gi) ?? [];
+
+    return {
+      detail: ctx.detail ?? "",
+      severity: ctx.severity ?? "LOW",
+      source: ctx.source ?? undefined,
+      timestamp: ctx.timestamp ?? null,
+      cve: cveMatches,
+    };
+  });
+
+  // gabungkan semua CVE yang ditemukan
+  const allCveFromContext = [
+    ...crowdsourcedContext.flatMap((c) => c.cve ?? []),
+    ...crowdsourcedContextItems.flatMap((c: any) => c.cve ?? []),
+  ].map((c) => c.toUpperCase());
+
+  const cveExtracted = [
+    ...new Set(
+      [
+        ...tags.filter((t: string) => /^CVE-\d{4}-\d{4,7}$/i.test(t)),
+        ...allCveFromContext,
+      ].map((c) => c.toUpperCase())
+    ),
+  ];
 
   return {
     indicator,
@@ -161,7 +218,7 @@ export async function fetchVirusTotal(indicator: string, type: string) {
     stats,
     total,
     virustotal: {
-      hash,
+      indicator,
       meaningful_name: meaningfulName,
       type_description: typeDescription,
       file_size: fileSize,
@@ -183,6 +240,7 @@ export async function fetchVirusTotal(indicator: string, type: string) {
       tags,
       behavior_summary: behaviorSummary,
       sigma_analysis_results: sigmaResults,
+      crowdsourced_context: crowdsourcedContextItems,
       cve_extracted: cveExtracted,
     },
     vendors,
