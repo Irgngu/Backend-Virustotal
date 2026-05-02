@@ -384,6 +384,7 @@ if (score > 50) {
       numDistinctUsers: abuse.numDistinctUsers || 0,
       last_reported_at: abuse.last_reported_at || null,
       recent_reports: abuse.recent_reports || [],
+      abuse_categories: abuse.abuse_categories || [],
     });
   } catch (error) {
     console.error(error);
