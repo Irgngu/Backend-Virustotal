@@ -244,6 +244,7 @@ app.post("/chat", async (c) => {
     /* ===============================
        AI REPORT
     ============================== */
+    // server.ts — bagian AI REPORT
     const aiAnalysis = await generateReportAI({
       type,
       indicator,
@@ -255,7 +256,8 @@ app.post("/chat", async (c) => {
       totalReports,
       totalVendors,
       mispData,
-      nvdData,
+      cveMatches, // ✅ sudah ada dari matchCVE() di atas
+      cveRiskScore, // ✅ sudah ada dari calculateCVERiskScore() di atas
       correlationInsights,
     });
 
