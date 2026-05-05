@@ -97,7 +97,7 @@ function formatAbuseIPDB(api: any) {
       name: CATEGORY_MAP[id] || "Unknown",
     })),
 
-    recent_reports: sortedReports.slice(0, 3).map((r: any) => ({
+    recent_reports: sortedReports.slice(0, 5).map((r: any) => ({
       reported_at: r.reportedAt,
       comment: r.comment,
       categories: r.categories,

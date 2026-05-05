@@ -7,7 +7,8 @@ import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { cors } from "hono/cors";
 import net from "net";
-
+import { randomUUID } from "crypto"; // ← TAMBAH
+import type { Server } from "http";
 /* ===============================
    SERVICES
 ============================== */
@@ -29,7 +30,13 @@ import {
    CORE
 ============================== */
 import { generateCorrelationInsights } from "./core/correlation.js";
-
+/* ── History & WS ── */ // ← TAMBAH BLOK INI
+import {
+  saveToHistory,
+  loadHistory,
+  getReportById,
+} from "./services/historyStore.js";
+import { initWSS, broadcastNewReport } from "./services/wsManager.js";
 /* ===============================
    ROUTES
 ============================== */
@@ -53,6 +60,29 @@ app.route("/api/nvd", nvdRoute);
    ROOT
 ============================== */
 app.get("/", (c) => c.text("Threat Intelligence API running"));
+
+/* ══════════════════════════════════════
+   GET /history  — ambil semua history
+══════════════════════════════════════ */
+app.get("/history", (c) => {
+  try {
+    const history = loadHistory();
+    return c.json({ success: true, history });
+  } catch (err) {
+    console.error("[history]", err);
+    return c.json({ error: "Failed to load history" }, 500);
+  }
+});
+
+/* ══════════════════════════════════════
+   GET /history/:id  — ambil satu report
+══════════════════════════════════════ */
+app.get("/history/:id", (c) => {
+  const reportId = c.req.param("id");
+  const entry = getReportById(reportId);
+  if (!entry) return c.json({ error: "Report not found" }, 404);
+  return c.json({ success: true, entry });
+});
 
 /* ===============================
    MISP ONLY
@@ -88,11 +118,22 @@ app.post("/misp/search", async (c) => {
 ============================== */
 app.post("/chat", async (c) => {
   try {
-    const { indicator, type } = await c.req.json();
+    const {
+      indicator,
+      type,
+      username = "Unknown",
+      email = "unknown@-",
+    } = await c.req.json();
 
     if (!indicator || !type) {
       return c.json({ error: "indicator & type required" }, 400);
     }
+
+    /* ── Generate reportId unik ── */ // ← TAMBAH
+    const now = new Date();
+    const datePart = now.toISOString().slice(0, 10).replace(/-/g, "");
+    const randPart = randomUUID().slice(0, 4).toUpperCase();
+    const reportId = `RPT-${datePart}-${randPart}`;
 
     /* ===============================
        VIRUSTOTAL
@@ -241,11 +282,13 @@ app.post("/chat", async (c) => {
       cveMatches,
       cveRiskScore,
     });
+
     /* ===============================
        AI REPORT
     ============================== */
     // server.ts — bagian AI REPORT
     const aiAnalysis = await generateReportAI({
+      reportId,
       type,
       indicator,
       malicious,
@@ -259,13 +302,31 @@ app.post("/chat", async (c) => {
       cveMatches, // ✅ sudah ada dari matchCVE() di atas
       cveRiskScore, // ✅ sudah ada dari calculateCVERiskScore() di atas
       correlationInsights,
+      mitreData: threatIntel,
     });
+    /* ── Threat Level untuk history ── */
+    const threatLevel = vt.threatLevel || severity;
+
+    /* ── Simpan ke history & broadcast WS ── */ // ← TAMBAH BLOK INI
+    const historyEntry = {
+      reportId,
+      username,
+      email,
+      ioc: indicator,
+      iocType: type,
+      threatLevel,
+      aiAnalysis,
+      createdAt: now.toISOString(),
+    };
+    saveToHistory(historyEntry);
+    broadcastNewReport(historyEntry);
 
     /* ===============================
        FINAL RESPONSE
     ============================== */
     return c.json({
       success: true,
+      reportId,
       severity,
       aiAnalysis,
       correlationInsights,
@@ -412,9 +473,7 @@ app.post("/check-ip", async (c) => {
 ============================== */
 const PORT = Number(process.env.PORT) || 5000;
 
-serve({
-  fetch: app.fetch,
-  port: PORT,
-});
+const server = serve({ fetch: app.fetch, port: PORT }) as Server; // ← UBAH
+initWSS(server);
 
 console.log(`Server running on http://localhost:${PORT}`);
