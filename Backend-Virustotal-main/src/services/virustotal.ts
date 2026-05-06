@@ -1,3 +1,15 @@
+function extractCVEsFromText(text: string): string[] {
+  const matches = text.match(/CVE[-_]\d{4}[-_]\d{4,7}/gi) ?? [];
+
+  return [
+    ...new Set(
+      matches.map((c) =>
+        c.replace(/_/g, "-").toUpperCase()
+      )
+    ),
+  ];
+}
+
 export async function fetchVirusTotal(indicator: string, type: string) {
   const API_KEY = process.env.VT_API_KEY;
 
@@ -40,9 +52,15 @@ export async function fetchVirusTotal(indicator: string, type: string) {
     stats.malicious + stats.suspicious + stats.harmless + stats.undetected;
 
   const threatLevel =
-    stats.malicious >= 10 ? "CRITICAL" : stats.malicious > 0 ? "HIGH" : stats.suspicious > 0 ? "MEDIUM" : "LOW";
+    stats.malicious >= 10
+      ? "CRITICAL"
+      : stats.malicious > 0
+        ? "HIGH"
+        : stats.suspicious > 0
+          ? "MEDIUM"
+          : "LOW";
 
-// ── BARU: metadata file ────────────────────────────────────
+  // ── BARU: metadata file ────────────────────────────────────
   const hash = json.data.id ?? indicator;
   const meaningfulName = attr.meaningful_name ?? attr.name ?? null;
   const typeDescription = attr.type_description ?? null;
@@ -58,7 +76,7 @@ export async function fetchVirusTotal(indicator: string, type: string) {
     null;
   const popularThreatNames: string[] =
     attr.popular_threat_classification?.popular_threat_name?.map(
-      (t: any) => t.value
+      (t: any) => t.value,
     ) ?? [];
 
   // ── BARU: tags ─────────────────────────────────────────────
@@ -67,16 +85,17 @@ export async function fetchVirusTotal(indicator: string, type: string) {
   // ── BARU: behavior summary (hanya tersedia di endpoint /files/{hash}/behaviours) ──
   // Perlu request tambahan khusus untuk file hash
   let behaviorSummary = null;
-  if (type === "file" || type === "hash") {
+
+  const isFileHash = type === "file" || type.startsWith("hash");
+
+  if (isFileHash) {
     const behaviorRes = await fetch(
       `https://www.virustotal.com/api/v3/files/${indicator}/behaviours`,
-      { headers: { "x-apikey": API_KEY! } }
+      { headers: { "x-apikey": API_KEY! } },
     );
 
     if (behaviorRes.ok) {
-      
       const behaviorJson = await behaviorRes.json();
-      // Agregasi dari semua sandbox yang tersedia
       const sandboxes = behaviorJson.data ?? [];
 
       const networkCommunications = new Set<string>();
@@ -84,45 +103,29 @@ export async function fetchVirusTotal(indicator: string, type: string) {
       const registryModifications: string[] = [];
       const processesCreated: string[] = [];
       let filesEncrypted = false;
-      let mutexCreated: string | null = null;
 
       for (const sandbox of sandboxes) {
         const b = sandbox.attributes;
 
-        // Network
-        b?.network_protocols?.forEach((p: string) =>
-          networkCommunications.add(p)
-        );
         b?.dns_lookups?.forEach((d: any) => {
           if (d.hostname) networkCommunications.add(d.hostname);
         });
 
-        // Files dropped
         b?.files_dropped?.forEach((f: any) => {
           if (f.path) dropsFiles.push(f.path.split("\\").pop());
         });
 
-        // Registry
         b?.registry_keys_set?.forEach((r: any) => {
           if (r.key) registryModifications.push(r.key);
         });
 
-        // Processes
-        b?.processes_created?.forEach((p: string) => processesCreated.push(p));
-        b?.command_executions?.forEach((c: string) =>
-          processesCreated.push(c)
-        );
+        b?.processes_created?.forEach((p: string) => {
+          processesCreated.push(p);
+        });
 
-        // Mutex
-        if (!mutexCreated && b?.mutexes_created?.[0]) {
-          mutexCreated = b.mutexes_created[0];
-        }
-
-        // Files encrypted — tandai jika ada ekstensi .wncry / .wnry atau serupa
         if (
           b?.files_dropped?.some(
-            (f: any) =>
-              f.path?.includes(".wncry") || f.path?.includes(".wnry")
+            (f: any) => f.path?.includes(".wncry") || f.path?.includes(".wnry"),
           )
         ) {
           filesEncrypted = true;
@@ -135,14 +138,31 @@ export async function fetchVirusTotal(indicator: string, type: string) {
         drops_files: [...new Set(dropsFiles)],
         registry_modifications: [...new Set(registryModifications)],
         processes_created: [...new Set(processesCreated)],
-        mutex_created: mutexCreated,
       };
     }
   }
 
+    // ── BARU: crowdsourced YARA rules (INI YANG DARI SCREENSHOT) ──
+  const yaraResults = attr.crowdsourced_yara_results ?? [];
+
+  let yaraTextBlob = "";
+
+  for (const rule of yaraResults) {
+    yaraTextBlob += `
+      ${rule.rule_name ?? ""}
+      ${rule.description ?? ""}
+      ${rule.source ?? ""}
+    `;
+  }
+
+  const yaraCVEs = extractCVEsFromText(yaraTextBlob);
   // ── BARU: sigma rules ──────────────────────────────────────
   // Diambil dari crowdsourced_ids_results (tersedia di respons utama)
-  const sigmaResults: { rule_id: string; rule_title: string; severity: string }[] = [];
+  const sigmaResults: {
+    rule_id: string;
+    rule_title: string;
+    severity: string;
+  }[] = [];
   const sigmaRaw = attr.crowdsourced_ids_results ?? [];
   for (const rule of sigmaRaw) {
     sigmaResults.push({
@@ -176,23 +196,45 @@ export async function fetchVirusTotal(indicator: string, type: string) {
   // ── BARU: crowdsourced_context khusus IP/domain ──
   // Field ini berbeda dari crowdsourced_ids_results, khusus ada di IP & domain
   const crowdsourcedContextRaw = attr.crowdsourced_context ?? [];
+  console.log("RAW crowdsourced_context:", JSON.stringify(crowdsourcedContextRaw, null, 2));
   const crowdsourcedContextItems = crowdsourcedContextRaw.map((ctx: any) => {
-    const textBlob = [
-      ctx.detail,
-      ctx.title,
-      ctx.message,
-    ]
+    const detailText =
+      ctx.detail ??
+      ctx.details ??
+      ctx.description ??
+      ctx.message ??
+      ctx.text ??
+      "";
+
+    const titleText =
+      ctx.title ??
+      ctx.heading ??
+      "Untitled";
+
+    const sourceText =
+      ctx.source ??
+      ctx.source_name ??
+      ctx.vendor ??
+      null;
+
+    const severityText =
+      ctx.severity ??
+      ctx.alert_severity ??
+      ctx.level ??
+      "LOW";
+    const textBlob = [ctx.detail, ctx.title, ctx.message]
       .filter(Boolean)
       .join(" ");
-
-    const cveMatches = textBlob.match(/CVE-\d{4}-\d{4,7}/gi) ?? [];
+    const cveMatches = textBlob.match(/CVE-\d{4}-\d{4,7}/gi) ?? [];    
 
     return {
-      detail: ctx.detail ?? "",
-      severity: ctx.severity ?? "LOW",
-      source: ctx.source ?? undefined,
+      title: titleText,
+      detail: detailText,
+      source: sourceText,
+      severity: severityText,
       timestamp: ctx.timestamp ?? null,
       cve: cveMatches,
+      link: ctx.link ?? null,
     };
   });
 
@@ -202,14 +244,17 @@ export async function fetchVirusTotal(indicator: string, type: string) {
     ...crowdsourcedContextItems.flatMap((c: any) => c.cve ?? []),
   ].map((c) => c.toUpperCase());
 
-  const cveExtracted = [
-    ...new Set(
-      [
-        ...tags.filter((t: string) => /^CVE-\d{4}-\d{4,7}$/i.test(t)),
-        ...allCveFromContext,
-      ].map((c) => c.toUpperCase())
+const cveExtracted = [
+  ...new Set(
+    [
+      ...tags.filter((t: string) => /^CVE[-_]\d{4}[-_]\d{4,7}$/i.test(t)),
+      ...allCveFromContext,
+      ...yaraCVEs, // 🔥 TAMBAHAN DARI YARA
+    ].map((c) =>
+      c.replace(/_/g, "-").toUpperCase()
     ),
-  ];
+  ),
+];
 
   return {
     indicator,
@@ -242,6 +287,7 @@ export async function fetchVirusTotal(indicator: string, type: string) {
       sigma_analysis_results: sigmaResults,
       crowdsourced_context: crowdsourcedContextItems,
       cve_extracted: cveExtracted,
+      yara_cves: yaraCVEs,
     },
     vendors,
   };
