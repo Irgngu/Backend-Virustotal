@@ -1,3 +1,15 @@
+function extractCVEsFromText(text: string): string[] {
+  const matches = text.match(/CVE[-_]\d{4}[-_]\d{4,7}/gi) ?? [];
+
+  return [
+    ...new Set(
+      matches.map((c) =>
+        c.replace(/_/g, "-").toUpperCase()
+      )
+    ),
+  ];
+}
+
 export async function fetchVirusTotal(indicator: string, type: string) {
   const API_KEY = process.env.VT_API_KEY;
 
@@ -130,6 +142,20 @@ export async function fetchVirusTotal(indicator: string, type: string) {
     }
   }
 
+    // ── BARU: crowdsourced YARA rules (INI YANG DARI SCREENSHOT) ──
+  const yaraResults = attr.crowdsourced_yara_results ?? [];
+
+  let yaraTextBlob = "";
+
+  for (const rule of yaraResults) {
+    yaraTextBlob += `
+      ${rule.rule_name ?? ""}
+      ${rule.description ?? ""}
+      ${rule.source ?? ""}
+    `;
+  }
+
+  const yaraCVEs = extractCVEsFromText(yaraTextBlob);
   // ── BARU: sigma rules ──────────────────────────────────────
   // Diambil dari crowdsourced_ids_results (tersedia di respons utama)
   const sigmaResults: {
@@ -170,19 +196,45 @@ export async function fetchVirusTotal(indicator: string, type: string) {
   // ── BARU: crowdsourced_context khusus IP/domain ──
   // Field ini berbeda dari crowdsourced_ids_results, khusus ada di IP & domain
   const crowdsourcedContextRaw = attr.crowdsourced_context ?? [];
+  console.log("RAW crowdsourced_context:", JSON.stringify(crowdsourcedContextRaw, null, 2));
   const crowdsourcedContextItems = crowdsourcedContextRaw.map((ctx: any) => {
+    const detailText =
+      ctx.detail ??
+      ctx.details ??
+      ctx.description ??
+      ctx.message ??
+      ctx.text ??
+      "";
+
+    const titleText =
+      ctx.title ??
+      ctx.heading ??
+      "Untitled";
+
+    const sourceText =
+      ctx.source ??
+      ctx.source_name ??
+      ctx.vendor ??
+      null;
+
+    const severityText =
+      ctx.severity ??
+      ctx.alert_severity ??
+      ctx.level ??
+      "LOW";
     const textBlob = [ctx.detail, ctx.title, ctx.message]
       .filter(Boolean)
       .join(" ");
-
-    const cveMatches = textBlob.match(/CVE-\d{4}-\d{4,7}/gi) ?? [];
+    const cveMatches = textBlob.match(/CVE-\d{4}-\d{4,7}/gi) ?? [];    
 
     return {
-      detail: ctx.detail ?? "",
-      severity: ctx.severity ?? "LOW",
-      source: ctx.source ?? undefined,
+      title: titleText,
+      detail: detailText,
+      source: sourceText,
+      severity: severityText,
       timestamp: ctx.timestamp ?? null,
       cve: cveMatches,
+      link: ctx.link ?? null,
     };
   });
 
@@ -192,14 +244,17 @@ export async function fetchVirusTotal(indicator: string, type: string) {
     ...crowdsourcedContextItems.flatMap((c: any) => c.cve ?? []),
   ].map((c) => c.toUpperCase());
 
-  const cveExtracted = [
-    ...new Set(
-      [
-        ...tags.filter((t: string) => /^CVE-\d{4}-\d{4,7}$/i.test(t)),
-        ...allCveFromContext,
-      ].map((c) => c.toUpperCase()),
+const cveExtracted = [
+  ...new Set(
+    [
+      ...tags.filter((t: string) => /^CVE[-_]\d{4}[-_]\d{4,7}$/i.test(t)),
+      ...allCveFromContext,
+      ...yaraCVEs, // 🔥 TAMBAHAN DARI YARA
+    ].map((c) =>
+      c.replace(/_/g, "-").toUpperCase()
     ),
-  ];
+  ),
+];
 
   return {
     indicator,
@@ -232,6 +287,7 @@ export async function fetchVirusTotal(indicator: string, type: string) {
       sigma_analysis_results: sigmaResults,
       crowdsourced_context: crowdsourcedContextItems,
       cve_extracted: cveExtracted,
+      yara_cves: yaraCVEs,
     },
     vendors,
   };

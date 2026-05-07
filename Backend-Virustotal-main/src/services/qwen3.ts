@@ -175,7 +175,9 @@ export async function generateReportAI(data: any) {
 You are a cybersecurity analyst.
 Write a professional Threat Intelligence Report.
 Use ONLY provided data.
-DO NOT include "Prepared by", "Contact", organization, or author info
+DO NOT include "Prepared by", "Contact", organization, or author info.
+Keep mitigation strategies as single-line entries.
+
 `;
   const mitreBlock = buildMitreBlock(mitreData);
   const mitigationBlock = buildMitigationBlock(mitreData);

@@ -256,7 +256,13 @@ app.post("/chat", async (c) => {
     const threatIntel = await analyzeThreatToMitigation(normalized);
 
     const mitreMitigations = threatIntel.mitigations ?? [];
-    const mitreTechnique = threatIntel.primaryTechnique;
+    const mitreTechniques = [
+      ...new Set(
+        (threatIntel.techniques || [])
+          .map((t: any) => t.technique)
+          .filter(Boolean),
+      ),
+    ];
     const mitreName = threatIntel.primaryTechniqueName;
 
     /* ──────────────────────────────
@@ -337,8 +343,8 @@ app.post("/chat", async (c) => {
       reasoning,
       cve: threatIntel.cve,
       cwe: threatIntel.cwe,
-      mitreMitigations,
-      mitreTechnique,
+      mitreMitigations: threatIntel.mitigations,
+      mitreTechniques,
       mitreTechniqueName: mitreName,
       mitigationActions: mitreMitigations.map((m) => m.name),
       nvdData,
