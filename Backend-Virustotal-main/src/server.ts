@@ -26,6 +26,7 @@ import {
   type CVEMatchResult,
   type CVERiskScore,
 } from "./services/cve.js";
+import { fetchWHOIS } from "./services/whois.js";
 /* ===============================
    CORE
 ============================== */
@@ -139,6 +140,11 @@ app.post("/chat", async (c) => {
        VIRUSTOTAL
     ============================== */
     const vt = await fetchVirusTotal(indicator, type);
+    // ── WHOIS (hanya untuk IP) ──
+    let whoisData = null;
+    if (type === "ip") {
+      whoisData = await fetchWHOIS(indicator);
+    }
 
     /* ===============================
        ABUSEIPDB
@@ -309,6 +315,10 @@ app.post("/chat", async (c) => {
       cveRiskScore, // ✅ sudah ada dari calculateCVERiskScore() di atas
       correlationInsights,
       mitreData: threatIntel,
+      whoisData, // ← TAMBAH INI
+      history: vt.virustotal?.history ?? null, // ← TAMBAH
+      pe_header: vt.virustotal?.pe_header ?? null, // ← TAMBAH
+      abuseipdb, // ← TAMBAH
     });
     /* ── Threat Level untuk history ── */
     const threatLevel = vt.threatLevel || severity;
@@ -351,6 +361,9 @@ app.post("/chat", async (c) => {
       virusTotalIntel: vt.virustotal ?? null,
       cveMatches,
       cveRiskScore,
+      whoisData,
+      history: vt.virustotal?.history ?? null, // ← TAMBAH
+      pe_header: vt.virustotal?.pe_header ?? null, // ← TAMBAH
     });
   } catch (err) {
     console.error(err);

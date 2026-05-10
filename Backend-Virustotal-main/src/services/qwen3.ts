@@ -52,6 +52,7 @@ function buildMISPBlock(mispData: any): string {
     `Confidence     : ${mispData.confidence}`,
     `Threat Level   : ${mispData.threatLevel}`,
     `Threat Actor   : ${mispData.threatActor ?? "Unknown"}`,
+    `Source Org     : ${mispData.sourceOrg ?? "-"}`, // ← TAMBAH
     `Tags           : ${(mispData.tags || []).join(", ") || "-"}`,
   ].join("\n");
 }
@@ -112,6 +113,94 @@ function buildMitigationBlock(mitreData: any): string {
   return lines.join("\n");
 }
 
+function buildWHOISBlock(whoisData: any): string {
+  if (!whoisData) return "No WHOIS data available.";
+
+  const { timestamps, ip_address, cti_source, author } = whoisData;
+
+  return [
+    `IP Range   : ${ip_address.range_start} - ${ip_address.range_end} (${ip_address.cidr ?? "-"})`,
+    ``,
+    `Timestamps:`,
+    `- Registered : ${timestamps.inetnum_created ?? "-"}`,
+    `- Last Modified : ${timestamps.inetnum_last_modified ?? "-"}`,
+    `- Route Active  : ${timestamps.route_created ?? "-"}`,
+    ``,
+    `CTI Source : ${cti_source.source}${cti_source.filtered ? " (filtered)" : ""}`,
+    ``,
+    `Author / Owner:`,
+    `- Org Name  : ${author.org_name ?? "-"}`,
+    `- Org ID    : ${author.org_id ?? "-"}`,
+    `- Country   : ${author.country ?? "-"}`,
+    `- Maintainers: ${author.maintainers?.join(", ") ?? "-"}`,
+    `- Admin     : ${author.admin_contact ?? "-"}`,
+    `- Tech      : ${author.tech_contact ?? "-"}`,
+    `- Abuse Email: ${author.abuse_email ?? "-"}`,
+  ].join("\n");
+}
+
+function buildHistoryBlock(history: any): string {
+  if (!history) return "No history data available.";
+
+  return [
+    `Creation Time    : ${history.creation_time ?? "-"}`,
+    `First Seen (ITW) : ${history.first_seen_itw ?? "-"}`,
+    `First Submission : ${history.first_submission ?? "-"}`,
+    `Last Submission  : ${history.last_submission ?? "-"}`,
+    `Last Analysis    : ${history.last_analysis ?? "-"}`,
+  ].join("\n");
+}
+
+function buildPEHeaderBlock(pe_header: any): string {
+  if (!pe_header) return "No PE header data available.";
+
+  return [
+    `Target Machine      : ${pe_header.target_machine ?? "-"}`,
+    `Compilation Time    : ${pe_header.compilation_timestamp ?? "-"}`,
+    `Entry Point         : ${pe_header.entry_point ?? "-"}`,
+    `Contained Sections  : ${pe_header.contained_sections ?? "-"}`,
+  ].join("\n");
+}
+
+function buildVTOverviewBlock(data: any): string {
+  const {
+    indicator,
+    type,
+    malicious,
+    suspicious,
+    harmless,
+    undetected,
+    totalVendors,
+    detectionRate,
+  } = data;
+
+  return [
+    `Indicator        : ${indicator}`,
+    `Type             : ${type}`,
+    `Malicious        : ${malicious}`,
+    `Suspicious       : ${suspicious}`,
+    `Harmless         : ${harmless}`,
+    `Undetected       : ${undetected}`,
+    `Total Vendors    : ${totalVendors}`,
+    `Detection Rate   : ${detectionRate}%`,
+  ].join("\n");
+}
+
+function buildAbuseOverviewBlock(abuseipdb: any): string {
+  if (!abuseipdb) return "No AbuseIPDB data available.";
+
+  return [
+    `IP Version       : IPv${abuseipdb.ip_version ?? "-"}`,
+    `Abuse Score      : ${abuseipdb.abuse_confidence_score ?? 0}%`,
+    `Total Reports    : ${abuseipdb.total_reports ?? 0}`,
+    `Distinct Users   : ${abuseipdb.numDistinctUsers ?? 0}`,
+    `Country          : ${abuseipdb.country_code ?? "-"}`,
+    `ISP              : ${abuseipdb.isp ?? "-"}`,
+    `Usage Type       : ${abuseipdb.usage_type ?? "-"}`,
+    `Last Reported    : ${abuseipdb.last_reported_at ?? "-"}`,
+  ].join("\n");
+}
+
 // ══════════════════════════════════════════════════════
 // MAIN FUNCTION
 // ══════════════════════════════════════════════════════
@@ -146,6 +235,10 @@ export async function generateReportAI(data: any) {
     // 🔥 [BARU]
     mitreData,
     reportId,
+    whoisData = null, // ← TAMBAH INI
+    history = null, // ← TAMBAH
+    pe_header = null, // ← TAMBAH
+    abuseipdb = null, // ← TAMBAH
   } = data;
 
   const detectionRate =
@@ -167,6 +260,17 @@ export async function generateReportAI(data: any) {
 
   const cveBlock = buildCVEBlock(cveMatches, cveRiskScore);
   const mispBlock = buildMISPBlock(mispData);
+  const vtOverviewBlock = buildVTOverviewBlock({
+    indicator,
+    type,
+    malicious,
+    suspicious,
+    harmless,
+    undetected,
+    totalVendors,
+    detectionRate,
+  });
+  const abuseOverviewBlock = buildAbuseOverviewBlock(abuseipdb);
 
   // ════════════════════════════════════════════════════
   // PROMPT
@@ -176,17 +280,22 @@ You are a cybersecurity analyst.
 Write a professional Threat Intelligence Report.
 Use ONLY provided data.
 DO NOT include "Prepared by", "Contact", organization, or author info.
-Keep mitigation strategies as single-line entries.
+Keep mitigation strategies AND MITRE ATT&CK ANALYSIS as single-line entries.
 
 `;
   const mitreBlock = buildMitreBlock(mitreData);
   const mitigationBlock = buildMitigationBlock(mitreData);
+  const whoisBlock = buildWHOISBlock(whoisData);
+  const historyBlock = buildHistoryBlock(history);
+  const peHeaderBlock = buildPEHeaderBlock(pe_header);
+  const isFile = type === "file" || type?.startsWith("hash"); // ← TAMBAH DI SINI
+
   const userPrompt = `
 THREAT INTELLIGENCE REPORT
 --------------------------------------------------
 Report ID : ${reportId}
 Date: ${now}
-Source: VirusTotal, AbuseIPDB, MISP, NVD, MITRE ATT&CK
+Source: VirusTotal, AbuseIPDB, MISP, NVD, MITRE ATT&CK, RIPE WHOIS
 --------------------------------------------------
 
 EXECUTIVE SUMMARY
@@ -197,19 +306,17 @@ ${correlationInsights}
 
 THREAT OVERVIEW
 
-Indicator        : ${indicator}
-Type             : ${type}
-Threat Level     : ${threatLevel}
-Confidence       : ${confidence}/100
+--- VirusTotal ---
 
-Detection:
-- Malicious      : ${malicious}
-- Suspicious     : ${suspicious}
-- Detection Rate : ${detectionRate}%
+${vtOverviewBlock}
 
-Reputation:
-- Abuse Score    : ${abuseScore}%
-- Reports        : ${totalReports}
+${
+  !isFile
+    ? `--- AbuseIPDB ---
+
+${abuseOverviewBlock}`
+    : ""
+}
 
 --------------------------------------------------
 
@@ -223,12 +330,41 @@ THREAT INTELLIGENCE (MISP)
 
 ${mispBlock}
 
+${
+  !isFile
+    ? `
 --------------------------------------------------
+
+WHOIS INTELLIGENCE
+
+${whoisBlock}
+
+`
+    : ""
+}
+
+${
+  isFile
+    ? `
+--------------------------------------------------
+
+FILE HISTORY
+
+${historyBlock}
+
+--------------------------------------------------
+
+PE HEADER ANALYSIS
+
+${peHeaderBlock}
+
+`
+    : ""
+}
 
 MITRE ATT&CK ANALYSIS
 
 ${mitreBlock}
-
 
 --------------------------------------------------
 
@@ -288,6 +424,7 @@ REFERENCES
       { role: "user", content: userPrompt },
     ],
     temperature: 0.3,
+    max_tokens: 1700, // ✅ Add this line
   });
 
   const raw = completion.choices?.[0]?.message?.content || "No response";

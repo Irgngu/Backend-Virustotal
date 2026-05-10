@@ -79,6 +79,7 @@ function formatAbuseIPDB(api: any) {
 
   return {
     ip: api.ipAddress || null,
+    ip_version: api.ipVersion ?? null, // ← TAMBAH DI SINI
     abuse_confidence_score: api.abuseConfidenceScore || 0,
     total_reports: api.totalReports || 0,
     country_code: api.countryCode || null,
