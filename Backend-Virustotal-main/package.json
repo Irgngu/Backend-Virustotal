@@ -13,12 +13,14 @@
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "hono": "^4.12.15",
+    "markdown-it": "^14.1.1",
     "openai": "^6.34.0",
     "pdfkit": "^0.18.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.6",
+    "@types/markdown-it": "^14.1.2",
     "@types/node": "^25.3.5",
     "@types/pdfkit": "^0.17.5",
     "tsx": "^4.21.0",

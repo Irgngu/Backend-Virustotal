@@ -19,6 +19,12 @@ import {
   calculateConfidence,
   analyzeThreatToMitigation,
 } from "./services/mitigation.js";
+import {
+  matchCVE,
+  calculateCVERiskScore,
+  type CVEMatchResult,
+  type CVERiskScore,
+} from "./services/cve.js";
 /* ===============================
    CORE
 ============================== */
@@ -85,12 +91,7 @@ app.post("/chat", async (c) => {
     const { indicator, type } = await c.req.json();
 
     if (!indicator || !type) {
-      return c.json(
-        {
-          error: "indicator & type required",
-        },
-        400,
-      );
+      return c.json({ error: "indicator & type required" }, 400);
     }
 
     /* ===============================
@@ -101,11 +102,12 @@ app.post("/chat", async (c) => {
     /* ===============================
        ABUSEIPDB
     ============================== */
-   let abuseipdb = null;
+    let abuseipdb = null;
 
-if (type === "ip") {
-  abuseipdb = await getAbuseIPDB(indicator);
-}
+    if (type === "ip") {
+      abuseipdb = await getAbuseIPDB(indicator);
+    }
+
     /* ===============================
        MISP
     ============================== */
@@ -131,61 +133,72 @@ if (type === "ip") {
     const totalReports = abuseipdb?.total_reports || 0;
 
     let nvdData = null;
-    // ===============================
-    // 🔥 SEVERITY CLASSIFICATION
-    // ===============================
+    /* ──────────────────────────────
+       5. CVE MATCHING (BARU)
+       Jalankan parallel dengan pipeline lain
+    ────────────────────────────── */
+    let cveMatches: CVEMatchResult[] = [];
+    let cveRiskScore: CVERiskScore = {
+      score: 0,
+      highest_cvss: 0,
+      critical_count: 0,
+      high_count: 0,
+      medium_count: 0,
+      exploit_count: 0,
+    };
+
+    try {
+      cveMatches = await matchCVE({ vtResult: vt, abuseipdb, mispData });
+      cveRiskScore = calculateCVERiskScore(cveMatches);
+      console.log(`[CVE] ${cveMatches.length} CVE(s) matched for ${indicator}`);
+    } catch (cveErr) {
+      // CVE matching adalah fitur tambahan — tidak boleh hentikan pipeline
+      console.warn("[CVE] matching failed (non-critical):", cveErr);
+    }
+
+    /* ──────────────────────────────
+       6. SEVERITY CLASSIFICATION
+       Mempertimbangkan CVE sekarang
+    ────────────────────────────── */
     const severity =
-      malicious >= 15 || abuseScore >= 80
+      malicious >= 15 || abuseScore >= 80 || cveRiskScore.critical_count > 0
         ? "Critical"
-        : malicious >= 8 || abuseScore >= 50
+        : malicious >= 8 || abuseScore >= 50 || cveRiskScore.high_count > 0
           ? "High"
-          : malicious >= 3
+          : malicious >= 3 || cveRiskScore.score > 40
             ? "Medium"
             : "Low";
 
-    // Extract VT intelligence tags
-    // ===============================
-
+    // ── VT TAGS (diperbarui) ──────────────────────────────────
     const vtTags: string[] = [];
 
-    // ambil kategori/community tags VT
+    // 🆕 Prioritaskan tags yang sudah diparse dari virustotal.ts
+    if (vt.virustotal?.tags && Array.isArray(vt.virustotal.tags)) {
+      vt.virustotal.tags.forEach((tag: string) => vtTags.push(tag));
+    }
+
+    // Scan vendors sebagai tambahan
     if (vt.vendors && Array.isArray(vt.vendors)) {
       vt.vendors.forEach((vendor: any) => {
         const result = vendor.result?.toLowerCase?.() || "";
-
         const category = vendor.category?.toLowerCase?.() || "";
 
-        if (result.includes("phish") || category.includes("phish")) {
+        if (result.includes("phish") || category.includes("phishing"))
           vtTags.push("phishing");
-        }
-
-        // trojan / malware
-        if (result.includes("trojan") || result.includes("malware")) {
+        if (result.includes("trojan") || result.includes("malware"))
           vtTags.push("trojan");
-        }
-
-        // botnet / c2
-        if (result.includes("botnet") || result.includes("c2")) {
+        if (result.includes("botnet") || result.includes("c2"))
           vtTags.push("c2");
-        }
-
-        // ransomware
-        if (result.includes("ransom")) {
-          vtTags.push("ransomware");
-        }
+        if (result.includes("ransom")) vtTags.push("ransomware");
       });
     }
 
-    // gabungkan semua tags
     const mergedTags = [...(mispData?.tags ?? []), ...vtTags];
-
-    // remove duplicate
     const uniqueTags = [...new Set(mergedTags)];
 
-    // ===============================
-    // Normalize
-    // ===============================
-
+    /* ──────────────────────────────
+       8. NORMALIZE → MITIGATION ENGINE
+    ────────────────────────────── */
     const normalized = {
       type,
       vt_score: malicious,
@@ -195,45 +208,43 @@ if (type === "ip") {
         | "High"
         | "Medium"
         | "Low",
-
       tags: uniqueTags,
     };
 
-    /* ── 4. CTI pipeline ── */
     const confidence = calculateConfidence(normalized);
     const threatIntel = await analyzeThreatToMitigation(normalized);
 
-    // ✅ mitreMitigations is the full MitigationAction[] array
     const mitreMitigations = threatIntel.mitigations ?? [];
-
     const mitreTechnique = threatIntel.primaryTechnique;
     const mitreName = threatIntel.primaryTechniqueName;
 
-    /* ===============================
-      🔥 EXPLAINABILITY (NEW)
-    ================================ */
+    /* ──────────────────────────────
+       9. EXPLAINABILITY
+    ────────────────────────────── */
     const reasoning = [
       `VT detections: ${malicious}/${totalVendors}`,
       `Abuse score: ${abuseScore}%`,
       `MISP confidence: ${mispData?.confidence || "Low"}`,
+      `CVE matches: ${cveMatches.length} (risk score: ${cveRiskScore.score}/100)`,
     ].join("\n");
 
-    /* ===============================
-       CORRELATION ENGINE
-    ============================== */
+    /* ──────────────────────────────
+       10. CORRELATION ENGINE
+       Sekarang menerima cveMatches & cveRiskScore
+    ────────────────────────────── */
     const correlationInsights = generateCorrelationInsights({
       malicious,
       totalVendors,
       abuseScore,
       totalReports,
       mispData,
-      // nvdData,
-      // censysData,
+      cveMatches,
+      cveRiskScore,
     });
-
     /* ===============================
        AI REPORT
     ============================== */
+    // server.ts — bagian AI REPORT
     const aiAnalysis = await generateReportAI({
       type,
       indicator,
@@ -245,7 +256,8 @@ if (type === "ip") {
       totalReports,
       totalVendors,
       mispData,
-      nvdData,
+      cveMatches, // ✅ sudah ada dari matchCVE() di atas
+      cveRiskScore, // ✅ sudah ada dari calculateCVERiskScore() di atas
       correlationInsights,
     });
 
@@ -269,16 +281,13 @@ if (type === "ip") {
       mitreTechniqueName: mitreName,
       mitigationActions: mitreMitigations.map((m) => m.name),
       nvdData,
+      virusTotalIntel: vt.virustotal ?? null,
+      cveMatches,
+      cveRiskScore,
     });
   } catch (err) {
     console.error(err);
-
-    return c.json(
-      {
-        error: "Failed generate report",
-      },
-      500,
-    );
+    return c.json({ error: "Failed to generate report" }, 500);
   }
 });
 
@@ -344,31 +353,31 @@ app.post("/check-ip", async (c) => {
 
     const abuse = await getAbuseIPDB(ip);
 
-if (!abuse) {
-  return c.json(
-    {
-      error: "Gagal mengambil data dari AbuseIPDB",
-    },
-    500,
-  );
-}
+    if (!abuse) {
+      return c.json(
+        {
+          error: "Gagal mengambil data dari AbuseIPDB",
+        },
+        500,
+      );
+    }
 
-const fallback = await getLocationFallback(ip);
+    const fallback = await getLocationFallback(ip);
 
-const score = abuse.abuse_confidence_score || 0;
-const reports = abuse.total_reports || 0;
+    const score = abuse.abuse_confidence_score || 0;
+    const reports = abuse.total_reports || 0;
 
-const country = abuse.country_code || fallback?.country;
-const city = fallback?.city || "-";
-const asn = fallback?.org || "Unknown";
+    const country = abuse.country_code || fallback?.country;
+    const city = fallback?.city || "-";
+    const asn = fallback?.org || "Unknown";
 
-let status = "Aman";
+    let status = "Aman";
 
-if (score > 50) {
-  status = "Berbahaya";
-} else if (score > 10) {
-  status = "Mencurigakan";
-}
+    if (score > 50) {
+      status = "Berbahaya";
+    } else if (score > 10) {
+      status = "Mencurigakan";
+    }
 
     return c.json({
       ip,

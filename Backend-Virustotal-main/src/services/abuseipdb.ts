@@ -63,20 +63,19 @@ function formatAbuseIPDB(api: any) {
 
   const sortedReports = reports.sort(
     (a: any, b: any) =>
-      new Date(b.reportedAt).getTime() -
-      new Date(a.reportedAt).getTime()
+      new Date(b.reportedAt).getTime() - new Date(a.reportedAt).getTime(),
   );
 
-   const uniqueCategories: number[] = Array.from(
-  new Set(
-    reports.flatMap((r: any) => {
-      if (Array.isArray(r.categories)) {
-        return r.categories;
-      }
-      return [];
-    })
-  )
-);
+  const uniqueCategories: number[] = Array.from(
+    new Set(
+      reports.flatMap((r: any) => {
+        if (Array.isArray(r.categories)) {
+          return r.categories;
+        }
+        return [];
+      }),
+    ),
+  );
 
   return {
     ip: api.ipAddress || null,
@@ -98,7 +97,7 @@ function formatAbuseIPDB(api: any) {
       name: CATEGORY_MAP[id] || "Unknown",
     })),
 
-    recent_reports: sortedReports.slice(0, 3).map((r: any) => ({
+    recent_reports: sortedReports.slice(0, 5).map((r: any) => ({
       reported_at: r.reportedAt,
       comment: r.comment,
       categories: r.categories,
