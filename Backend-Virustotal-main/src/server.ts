@@ -291,6 +291,7 @@ app.post("/chat", async (c) => {
       abuseScore,
       totalReports,
       mispData,
+      type,
       cveMatches,
       cveRiskScore,
     });

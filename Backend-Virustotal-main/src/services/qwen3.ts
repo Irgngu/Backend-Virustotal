@@ -201,6 +201,32 @@ function buildAbuseOverviewBlock(abuseipdb: any): string {
   ].join("\n");
 }
 
+async function callWithRetry(fn: () => Promise<any>, retries = 3) {
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      // HANDLE RATE LIMIT
+      if (err.status === 429 && attempt < retries - 1) {
+        const waitTime = err?.error?.metadata?.retry_after_seconds
+          ? err.error.metadata.retry_after_seconds * 1000
+          : 30000;
+
+        console.log(
+          `[AI] Rate limited. Retry in ${waitTime / 1000} seconds...`,
+        );
+
+        await new Promise((resolve) => setTimeout(resolve, waitTime));
+
+        continue;
+      }
+
+      console.error("[AI ERROR]", err);
+
+      throw err;
+    }
+  }
+}
 // ══════════════════════════════════════════════════════
 // MAIN FUNCTION
 // ══════════════════════════════════════════════════════
@@ -424,7 +450,7 @@ REFERENCES
       { role: "user", content: userPrompt },
     ],
     temperature: 0.3,
-    max_tokens: 1700, // ✅ Add this line
+    max_tokens: 2500, // ← TAMBAH INI
   });
 
   const raw = completion.choices?.[0]?.message?.content || "No response";
