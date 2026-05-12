@@ -5521,7 +5521,7 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
       },
       {
         id: "M1028",
-        name: "	Operating System Configuration",
+        name: "Operating System Configuration",
         description:
           "Make sure that the HISTCONTROL environment variable is set to 'ignoredups' instead of 'ignoreboth' or 'ignorespace'.",
         framework: "MITRE ATT&CK",
@@ -5726,7 +5726,7 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
         id: "-",
         name: "-",
         description:
-          "-",
+          "This type of attack technique cannot be easily mitigated with preventive controls since it is based on the abuse of system features.",
         framework: "MITRE ATT&CK",
       },
     ],
@@ -6594,7 +6594,7 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
       },
       {
         id: "M1041",
-        name: "	Encrypt Sensitive Information",
+        name: "Encrypt Sensitive Information",
         description:
           "Ensure certificates as well as associated private keys are appropriately secured. Consider utilizing additional hardware credential protections such as trusted platform modules (TPM) or hardware security modules (HSM). Enforce HTTPS and enable Extended Protection for Authentication.",
         framework: "MITRE ATT&CK",
@@ -6774,7 +6774,7 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
         id: "-",
         name: "-",
         description: "This type of attack technique cannot be easily mitigated with preventive controls since it is based on the abuse of system features.",
-        framework: "MITRE ATT&CK + OWASP A01 + NIST SP 800-53r5 AC-3",
+        framework: "MITRE ATT&CK",
       },
     ],
   },
