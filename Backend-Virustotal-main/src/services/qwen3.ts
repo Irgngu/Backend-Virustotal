@@ -307,6 +307,7 @@ Write a professional Threat Intelligence Report.
 Use ONLY provided data.
 DO NOT include "Prepared by", "Contact", organization, or author info.
 Keep mitigation strategies AND MITRE ATT&CK ANALYSIS as single-line entries.
+Add all tags from MISP data.
 
 `;
   const mitreBlock = buildMitreBlock(mitreData);
