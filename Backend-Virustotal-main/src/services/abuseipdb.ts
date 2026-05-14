@@ -3,7 +3,7 @@ import axios from "axios";
 /* ===============================
    🧠 CATEGORY MAP
 ================================ */
-const CATEGORY_MAP: Record<number, string> = {
+export const CATEGORY_MAP: Record<number, string> = {
   3: "Fraud Orders",
   4: "DDoS Attack",
   5: "FTP Brute-Force",

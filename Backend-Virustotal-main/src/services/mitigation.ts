@@ -2,10 +2,6 @@
 
 export interface NormalizedIndicator {
   type: string;
-  vt_score: number;
-  vt_total: number;
-  abuse_score: number;
-  misp_confidence: "High" | "Medium" | "Low" | string;
   tags: string[];
   malware_family?: string | null;
   threat_category?: string | null;
@@ -57,7 +53,14 @@ function hasTag(n: NormalizedIndicator, values: string[]): boolean {
 
 function hasTagPartial(n: NormalizedIndicator, partials: string[]): boolean {
   return partials.some((p) =>
-    n.tags?.some((t) => t.toLowerCase().includes(p.toLowerCase())),
+    n.tags?.some((t) => {
+      const tokens = t
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+        .filter(Boolean);
+
+      return tokens.includes(p.toLowerCase());
+    }),
   );
 }
 
@@ -81,16 +84,13 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
     tactic: "Reconnaissance",
     score: (n) => {
       let s = 0;
-      if (n.type === "ip") s += 20;
       if (hasTag(n, ["scanner", "scanning", "masscan", "shodan", "censys"])) s += 50;
-      if (n.abuse_score >= 30) s += 20;
       if (hasTagPartial(n, ["scan", "probe", "sweep"])) s += 20;
       return s;
     },
     reasons: (n) => {
       const r: string[] = [];
       if (hasTagPartial(n, ["scan", "probe"])) r.push("IOC tagged as active scanning activity");
-      if (n.abuse_score >= 30) r.push("AbuseIPDB score consistent with port scanning");
       return r;
     },
     mitigations: [
@@ -131,8 +131,8 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
     tactic: "Reconnaissance",
     score: (n) => {
       let s = 0;
-      if (n.type === "url" && hasTag(n, ["phishing", "spearphishing"])) s += 60;
-      if (n.type === "domain" && hasTagPartial(n, ["phish"])) s += 40;
+      if (hasTag(n, ["phishing", "spearphishing", "social-engineering", "brand-impersonation"])) s += 60;
+      if (hasTagPartial(n, ["phish"])) s += 40;
       return s;
     },
     reasons: (n) => {
@@ -602,7 +602,6 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
     score: (n) => {
       let s = 0;
       if (hasTag(n, ["compromised", "hijacked", "watering-hole"])) s += 60;
-      if (n.vt_score >= 3 && (n.type === "ip" || n.type === "domain")) s += 20;
       return s;
     },
     reasons: (n) => {
@@ -625,7 +624,6 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
     tactic: "Resource Development",
     score: (n) => {
       let s = 0;
-      if (n.type.includes("hash") && n.vt_score >= 5) s += 30;
       if (hasTag(n, ["custom-malware", "implant", "rat", "backdoor"])) s += 50;
       return s;
     },
@@ -664,8 +662,6 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
 
       if (hasTagPartial(n, ["access", "broker", "vpn", "rdp"])) s += 25;
 
-      if (n.abuse_score >= 30) s += 10;
-
       return s;
     },
 
@@ -674,10 +670,6 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
 
       if (hasTagPartial(n, ["access", "broker", "rdp"])) {
         r.push("IOC associated with acquired unauthorized access infrastructure");
-      }
-
-      if (n.abuse_score >= 30) {
-        r.push("AbuseIPDB score consistent with malicious remote access activity");
       }
 
       return r;
@@ -843,8 +835,6 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
 
       if (hasTagPartial(n, ["exploit", "payload", "toolkit"])) s += 25;
 
-      if (n.vt_score >= 5) s += 10;
-
       return s;
     },
 
@@ -923,14 +913,12 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
     score: (n) => {
       let s = 0;
       if (hasTag(n, ["rdp", "ssh", "vpn", "citrix", "remote-access", "remote-desktop"])) s += 60;
-      if (n.type === "ip" && n.abuse_score >= 30) s += 20;
       if (hasTagPartial(n, ["brute", "credential"])) s += 20;
       return s;
     },
     reasons: (n) => {
       const r: string[] = [];
       if (hasTagPartial(n, ["rdp", "ssh", "vpn"])) r.push("IOC associated with remote service exploitation");
-      if (n.abuse_score >= 30) r.push("AbuseIPDB score indicates remote service abuse attempts");
       return r;
     },
     mitigations: [
@@ -972,16 +960,12 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
     tactic: "Initial Access",
     score: (n) => {
       let s = 0;
-      if (n.type === "url") s += 15;
       if (hasTag(n, ["phishing", "credential-phishing", "spearphishing"])) s += 55;
-      if (n.misp_confidence === "High") s += 15;
-      if (n.vt_score >= 5) s += 10;
       return s;
     },
     reasons: (n) => {
       const r: string[] = [];
       if (hasTagPartial(n, ["phish"])) r.push("IOC tagged as phishing delivery infrastructure");
-      if (n.type === "url") r.push("URL-type IOC consistent with phishing link");
       return r;
     },
     mitigations: [
@@ -1029,9 +1013,8 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
     tactic: "Initial Access",
     score: (n) => {
       let s = 0;
-      if (n.type === "url" && hasTag(n, ["exploit", "drive-by", "exploit-kit"])) s += 65;
-      if (n.type === "domain" && hasTagPartial(n, ["exploit", "malvert"])) s += 40;
-      if (n.vt_score >= 5) s += 10;
+      if (hasTag(n, ["exploit", "drive-by", "exploit-kit"])) s += 65;
+      if (hasTagPartial(n, ["exploit", "malvert"])) s += 40;
       return s;
     },
     reasons: (n) => {
@@ -1133,14 +1116,12 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
     score: (n) => {
       let s = 0;
       if (hasTag(n, ["valid-accounts", "stolen-creds", "credential-access"])) s += 55;
-      if (n.misp_confidence === "High") s += 25;
       if (hasTagPartial(n, ["credential", "password", "token", "stolen"])) s += 20;
       return s;
     },
     reasons: (n) => {
       const r: string[] = [];
       if (hasTagPartial(n, ["credential", "stolen"])) r.push("IOC associated with stolen/abused valid credentials");
-      if (n.misp_confidence === "High") r.push("MISP high-confidence threat actor IOC");
       return r;
     },
     mitigations: [
@@ -1212,13 +1193,7 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
       )
         s += 65;
 
-      if (
-        n.type === "url" &&
-        hasTagPartial(n, ["inject", "malvert", "script"])
-      )
-        s += 30;
-
-      if (n.vt_score >= 5) s += 10;
+      if (hasTagPartial(n, ["inject", "malvert", "script"])) s += 30;
 
       return s;
     },
@@ -1264,24 +1239,15 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
 
       if (
         hasTag(n, [
-          "exploit",
-          "webshell",
-          "sqli",
-          "rce",
-          "lfi",
-          "rfi",
-          "ssrf",
+        "web-app-attack",
+        "sql-injection",
+        "exploit",
         ])
       )
         s += 60;
 
-      if (
-        n.type === "url" &&
-        hasTagPartial(n, ["exploit", "injection", "shell"])
-      )
+      if (hasTagPartial(n, ["exploit", "injection", "shell"]))
         s += 30;
-
-      if (n.vt_score >= 5) s += 10;
 
       return s;
     },
@@ -1429,9 +1395,6 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
         s += 65;
 
       if (hasTagPartial(n, ["usb", "autorun", "worm"])) s += 25;
-
-      if (n.type.includes("hash") && n.vt_score >= 5) s += 10;
-
       return s;
     },
 
@@ -1547,9 +1510,6 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
         s += 65;
 
       if (hasTagPartial(n, ["wifi", "wireless", "evil-twin"])) s += 25;
-
-      if (n.abuse_score >= 20) s += 10;
-
       return s;
     },
 
@@ -1668,14 +1628,11 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
     tactic: "Execution",
     score: (n) => {
       let s = 0;
-      if (n.type.includes("hash")) s += 35;
       if (hasTag(n, ["trojan", "dropper", "downloader", "malware"])) s += 40;
-      if (n.vt_score >= 5) s += 15;
       return s;
     },
     reasons: (n) => {
       const r: string[] = [];
-      if (n.type.includes("hash")) r.push("Indicator is a malicious file hash");
       if (hasTagPartial(n, ["trojan", "dropper", "malware"])) r.push("Tags indicate user-executed malware delivery");
       return r;
     },
@@ -2181,8 +2138,6 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
         s += 65;
 
       if (hasTagPartial(n, ["exploit", "client", "browser"])) s += 25;
-
-      if (n.vt_score >= 5) s += 10;
 
       return s;
     },
@@ -2875,7 +2830,6 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
     score: (n) => {
       let s = 0;
       if (hasTag(n, ["account-manipulation", "backdoor-account", "persistence"])) s += 60;
-      if (n.misp_confidence === "High") s += 20;
       return s;
     },
     reasons: (n) => {
@@ -4055,8 +4009,6 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
         s += 70;
 
       if (hasTagPartial(n, ["gpo", "policy", "tenant"])) s += 25;
-
-      if (n.misp_confidence === "High") s += 10;
 
       return s;
     },
@@ -5739,16 +5691,13 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
     tactic: "Credential Access",
     score: (n) => {
       let s = 0;
-      if (n.type === "ip") s += 15;
       if (hasTag(n, ["brute-force", "password-spray", "credential-stuffing"])) s += 55;
-      if (n.abuse_score >= 40) s += 20;
       if (hasTagPartial(n, ["brute", "spray", "stuff"])) s += 20;
       return s;
     },
     reasons: (n) => {
       const r: string[] = [];
       if (hasTagPartial(n, ["brute", "spray", "stuff"])) r.push("IOC tagged as brute-force/credential attack source");
-      if (n.abuse_score >= 40) r.push("AbuseIPDB score consistent with brute-force activity");
       return r;
     },
     mitigations: [
@@ -6725,7 +6674,6 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
     score: (n) => {
       let s = 0;
       if (hasTag(n, ["port-scan", "network-scan", "service-discovery"])) s += 60;
-      if (n.type === "ip" && n.abuse_score >= 30) s += 20;
       return s;
     },
     reasons: (n) => {
@@ -7271,7 +7219,6 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
     score: (n) => {
       let s = 0;
       if (hasTag(n, ["remote-enum", "host-discovery"])) s += 60;
-      if (n.abuse_score >= 30) s += 15;
       return s;
     },
     reasons: (n) => {
@@ -7664,14 +7611,12 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
     score: (n) => {
       let s = 0;
       if (hasTag(n, ["remote-exploit", "smb-exploit", "rdp-exploit", "eternalblue", "remote-service-exploit"])) s += 70;
-      if (n.type === "ip" && n.abuse_score >= 40) s += 20;
       if (hasTagPartial(n, ["exploit", "remote", "lateral"])) s += 20;
       return s;
     },
     reasons: (n) => {
       const r: string[] = [];
       if (hasTagPartial(n, ["eternalblue", "remote-exploit"])) r.push("IOC associated with exploitation of remote services for lateral movement");
-      if (n.abuse_score >= 40) r.push("AbuseIPDB score indicates suspicious remote exploitation attempts");
       return r;
     },
     mitigations: [
@@ -8377,7 +8322,6 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
     score: (n) => {
       let s = 0;
       if (hasTag(n, ["exfiltration", "data-theft", "c2-exfil"])) s += 65;
-      if (n.type === "ip" && n.abuse_score >= 50) s += 20;
       return s;
     },
     reasons: (n) => {
@@ -8676,17 +8620,12 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
     tactic: "Command and Control",
     score: (n) => {
       let s = 0;
-      if (n.type === "domain") s += 20;
-      if (n.type === "ip") s += 20;
       if (hasTag(n, ["c2", "command-and-control", "trojan", "botnet", "rat"])) s += 50;
-      if (n.abuse_score >= 50) s += 15;
-      if (n.vt_score >= 10) s += 10;
       return s;
     },
     reasons: (n) => {
       const r: string[] = [];
       if (hasTagPartial(n, ["c2", "botnet", "rat"])) r.push("Tags indicate C2/botnet communication channel");
-      if (n.abuse_score >= 50) r.push("High AbuseIPDB score confirms malicious reputation");
       return r;
     },
     mitigations: [
@@ -9049,7 +8988,6 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
     score: (n) => {
       let s = 0;
       if (hasTag(n, ["proxy", "tor", "vpn-abuse", "socks5"])) s += 65;
-      if (n.type === "ip") s += 20;
       return s;
     },
     reasons: (n) => {
@@ -9233,14 +9171,12 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
     score: (n) => {
       let s = 0;
       if (hasTag(n, ["ddos", "dos", "flood", "amplification", "reflection", "botnet-ddos"])) s += 70;
-      if (n.abuse_score >= 70) s += 20;
-      if (n.type === "ip" && hasTagPartial(n, ["ddos", "flood"])) s += 20;
+      if (hasTagPartial(n, ["ddos", "flood"])) s += 20;
       return s;
     },
     reasons: (n) => {
       const r: string[] = [];
       if (hasTagPartial(n, ["ddos", "flood", "amplification"])) r.push("IOC tagged as DDoS attack source or amplification node");
-      if (n.abuse_score >= 70) r.push("AbuseIPDB score strongly confirms attack traffic");
       return r;
     },
     mitigations: [
@@ -9479,7 +9415,6 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
     score: (n) => {
       let s = 0;
       if (hasTag(n, ["endpoint-dos", "application-crash", "resource-exhaustion"])) s += 70;
-      if (n.abuse_score >= 60) s += 15;
       return s;
     },
     reasons: (n) => {
@@ -9654,30 +9589,6 @@ const BASELINE_MITIGATIONS: MitigationAction[] = [
     framework: "NIST SP 800-61r2",
   },
 ];
-
-// ================================================================
-// Confidence Scoring
-// ================================================================
-
-export function calculateConfidence(
-  normalized: NormalizedIndicator,
-): "High" | "Medium" | "Low" {
-  const vtRatio =
-    normalized.vt_total > 0
-      ? (normalized.vt_score / normalized.vt_total) * 100
-      : 0;
-
-  let score = 0;
-  score += vtRatio * 0.4;
-  score += normalized.abuse_score * 0.3;
-  if (normalized.misp_confidence === "High") score += 25;
-  else if (normalized.misp_confidence === "Medium") score += 15;
-  if (normalized.tags.length > 0) score += 10;
-
-  if (score >= 70) return "High";
-  if (score >= 40) return "Medium";
-  return "Low";
-}
 
 // ================================================================
 // Main Analysis Engine

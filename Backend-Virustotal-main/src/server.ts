@@ -12,11 +12,10 @@ import net from "net";
    SERVICES
 ============================== */
 import { fetchVirusTotal } from "./services/virustotal.js";
-import { getAbuseIPDB, getLocationFallback } from "./services/abuseipdb.js";
+import { getAbuseIPDB, getLocationFallback, CATEGORY_MAP } from "./services/abuseipdb.js";
 import { generateReportAI } from "./services/qwen3.js";
 import { searchMISP } from "./services/misp.js";
 import {
-  calculateConfidence,
   analyzeThreatToMitigation,
 } from "./services/mitigation.js";
 import {
@@ -180,38 +179,196 @@ app.post("/chat", async (c) => {
     // Scan vendors sebagai tambahan
     if (vt.vendors && Array.isArray(vt.vendors)) {
       vt.vendors.forEach((vendor: any) => {
-        const result = vendor.result?.toLowerCase?.() || "";
-        const category = vendor.category?.toLowerCase?.() || "";
+        const result = vendor.result || "";
 
-        if (result.includes("phish") || category.includes("phishing"))
-          vtTags.push("phishing");
-        if (result.includes("trojan") || result.includes("malware"))
-          vtTags.push("trojan");
-        if (result.includes("botnet") || result.includes("c2"))
-          vtTags.push("c2");
-        if (result.includes("ransom")) vtTags.push("ransomware");
+        vtTags.push(...extractVendorTags(result));
       });
     }
 
     const mergedTags = [...(mispData?.tags ?? []), ...vtTags];
     const uniqueTags = [...new Set(mergedTags)];
 
+    function normalizeTags(tags: string[] = []): string[] {
+      return [...new Set(
+        tags
+          .map((t) =>
+            String(t)
+              .toLowerCase()
+              .trim()
+              .replace(/[_\s]+/g, "-")
+          )
+          .filter(Boolean)
+      )];
+    }
+    
+    function extractVendorTags(result: string): string[] {
+    const text = result.toLowerCase();
+
+    const patterns: Record<string, RegExp[]> = {
+      trojan: [
+        /\btrojan\b/,
+        /\btroj\b/,
+        /\btrj\b/,
+        /\btr\./,
+      ],
+
+      ransomware: [
+        /\bransom\b/,
+        /\bcrypt\b/,
+        /\blocker\b/,
+        /\bwannacry\b/,
+        /\blocky\b/,
+        /\bcerber\b/,
+      ],
+
+      backdoor: [
+        /\bbackdoor\b/,
+        /\bback\./,
+        /\bbckdr\b/,
+        /\bbdoor\b/,
+      ],
+
+      downloader: [
+        /\bdownloader\b/,
+        /\bdownload\b/,
+        /\bdwnldr\b/,
+        /\bdldr\b/,
+      ],
+
+      dropper: [
+        /\bdropper\b/,
+        /\bdrop\b/,
+        /\bdrp\b/,
+      ],
+
+      spyware: [
+        /\bspyware\b/,
+        /\bspy\b/,
+        /\bkeylog\b/,
+        /\blogger\b/,
+      ],
+
+      adware: [
+        /\badware\b/,
+        /\badload\b/,
+        /\badvert\b/,
+        /\badbrowser\b/,
+      ],
+
+      worm: [
+        /\bworm\b/,
+        /\bwrm\b/,
+        /\bautorun\b/,
+      ],
+
+      cryptominer: [
+        /\bminer\b/,
+        /\bcoinminer\b/,
+        /\bbitcoin\b/,
+        /\bcrypto\b/,
+        /\bxmrig\b/,
+        /\bcoinhive\b/,
+      ],
+
+      stealer: [
+        /\bstealer\b/,
+        /\bsteal\b/,
+        /\binfo\b/,
+        /\bpwstealer\b/,
+        /\bpws\b/,
+      ],
+
+      banker: [
+        /\bbanker\b/,
+        /\bbank\b/,
+        /\bzbot\b/,
+        /\bzeus\b/,
+        /\bdridex\b/,
+        /\bemotet\b/,
+      ],
+
+      rat: [
+        /\brat\b/,
+        /\bremoteadmin\b/,
+        /\bnjrat\b/,
+        /\bdarkcomet\b/,
+        /\bnanocore\b/,
+        /\bremote[-_\s]?access[-_\s]?trojan\b/,
+      ],
+
+      rootkit: [
+        /\brootkit\b/,
+        /\broot\b/,
+        /\bbootkit\b/,
+      ],
+
+      exploit: [
+        /\bexploit\b/,
+        /\bexp\b/,
+        /\bcve-/,
+        /\bshellcode\b/,
+      ],
+
+      pua: [
+        /\bpua\b/,
+        /\bunwanted\b/,
+        /\bpotentially\b/,
+        /\bpup\b/,
+        /\briskware\b/,
+        /\bhacktool\b/,
+      ],
+
+      phishing: [
+        /\bphish/,
+      ],
+
+      botnet: [
+        /\bbotnet\b/,
+      ],
+
+      c2: [
+        /\bc2\b/,
+        /command[-_\s]?and[-_\s]?control/,
+      ],
+
+      malware: [
+        /\bmalware\b/,
+      ],
+
+      loader: [
+        /\bloader\b/,
+      ],
+
+      keylogger: [
+        /\bkeylogger\b/,
+      ],
+    };
+
+    const found: string[] = [];
+
+    for (const [tag, regexes] of Object.entries(patterns)) {
+      if (regexes.some((r) => r.test(text))) {
+        found.push(tag);
+      }
+    }
+
+    return found;
+  }
     /* ──────────────────────────────
        8. NORMALIZE → MITIGATION ENGINE
     ────────────────────────────── */
     const normalized = {
       type,
-      vt_score: malicious,
-      vt_total: totalVendors,
-      abuse_score: abuseScore,
-      misp_confidence: (mispData?.confidence ?? "Low") as
-        | "High"
-        | "Medium"
-        | "Low",
-      tags: uniqueTags,
+      tags: normalizeTags([
+        ...uniqueTags,
+        ...(abuseipdb?.recent_reports?.flatMap((r: any) =>
+          (r.categories ?? [])
+            .map((id: number) => CATEGORY_MAP[id])
+            .filter(Boolean)
+        ) ?? []),
+      ]),
     };
 
-    const confidence = calculateConfidence(normalized);
     const threatIntel = await analyzeThreatToMitigation(normalized);
 
     const mitreMitigations = threatIntel.mitigations ?? [];
@@ -251,21 +408,21 @@ app.post("/chat", async (c) => {
        AI REPORT
     ============================== */
     // server.ts — bagian AI REPORT
-    const aiAnalysis = await generateReportAI({
-      type,
-      indicator,
-      malicious,
-      suspicious,
-      harmless,
-      undetected,
-      abuseScore,
-      totalReports,
-      totalVendors,
-      mispData,
-      cveMatches, // ✅ sudah ada dari matchCVE() di atas
-      cveRiskScore, // ✅ sudah ada dari calculateCVERiskScore() di atas
-      correlationInsights,
-    });
+    // const aiAnalysis = await generateReportAI({
+    //   type,
+    //   indicator,
+    //   malicious,
+    //   suspicious,
+    //   harmless,
+    //   undetected,
+    //   abuseScore,
+    //   totalReports,
+    //   totalVendors,
+    //   mispData,
+    //   cveMatches, // ✅ sudah ada dari matchCVE() di atas
+    //   cveRiskScore, // ✅ sudah ada dari calculateCVERiskScore() di atas
+    //   correlationInsights,
+    // });
 
     /* ===============================
        FINAL RESPONSE
@@ -273,12 +430,11 @@ app.post("/chat", async (c) => {
     return c.json({
       success: true,
       severity,
-      aiAnalysis,
+      //aiAnalysis,
       correlationInsights,
       vtData: vt,
       abuseipdb,
       mispData,
-      confidence,
       reasoning,
       cve: threatIntel.cve,
       cwe: threatIntel.cwe,
