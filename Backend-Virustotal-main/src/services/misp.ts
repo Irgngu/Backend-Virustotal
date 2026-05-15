@@ -68,6 +68,23 @@ function extractThreatActor(text: string): string | null {
 
   return null;
 }
+async function getMISPEventById(eventId: string | number) {
+  const MISP_URL = process.env.MISP_URL || "http://localhost:8082";
+
+  const MISP_API_KEY = process.env.MISP_API_KEY || "";
+
+  const res = await axios.get(`${MISP_URL}/events/view/${eventId}`, {
+    headers: {
+      Authorization: MISP_API_KEY.trim(),
+      "X-Auth-Token": MISP_API_KEY.trim(),
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    timeout: 20000,
+  });
+
+  return res.data?.Event || res.data?.response?.Event || null;
+}
 
 export async function searchMISP(indicator: string) {
   try {
@@ -97,12 +114,24 @@ export async function searchMISP(indicator: string) {
     );
 
     const attrs: any[] = res.data?.response?.Attribute || [];
+    console.log(
+      "MISP ATTRIBUTES:",
+      attrs.map((a: any) => ({
+        id: a.id,
+        event_id: a.event_id,
+        uuid: a.uuid,
+        value: a.value,
+        type: a.type,
+        category: a.category,
+        event_title: a.Event?.info,
+      })),
+    );
 
     if (!attrs.length) {
       return {
         matchCount: 0,
-        confidence: null,
-        score: 0,
+        title: null,
+        attributes: 0,
         threatLevel: null,
         sourceOrg: null,
         ownerOrg: null,
@@ -129,7 +158,6 @@ export async function searchMISP(indicator: string) {
 
         uuid: null,
         eventId: null,
-        title: null,
 
         tags: [],
         campaigns: [],
@@ -144,6 +172,15 @@ export async function searchMISP(indicator: string) {
     const events: any[] = attrs.map((a: any) => a.Event).filter(Boolean);
 
     const bestEvent = events[0];
+    const fullEvent = bestEvent?.id
+      ? await getMISPEventById(bestEvent.id)
+      : null;
+
+    const allEventAttributes: any[] = Array.isArray(fullEvent?.Attribute)
+      ? fullEvent.Attribute
+      : [];
+
+    const totalEventAttributes = allEventAttributes.length;
 
     const newestEvent = [...events].sort(
       (a: any, b: any) => Number(b.timestamp || 0) - Number(a.timestamp || 0),
@@ -219,13 +256,11 @@ export async function searchMISP(indicator: string) {
     // ========================
     // THREAT LEVEL
     // ========================
-    const threatLevel =
-      bestEvent?.ThreatLevel?.name ||
-      mapThreatLevel(bestEvent?.threat_level_id);
+    const threatLevel = mapThreatLevel(bestEvent?.threat_level_id);
 
-    const confidence = calcConfidence(attrs.length);
+    // const confidence = calcConfidence(attrs.length);
 
-    const score = calcScore(attrs.length, threatLevel, publishedCount);
+    // const score = calcScore(attrs.length, threatLevel, publishedCount);
 
     const title = bestEvent?.info || null;
 
@@ -233,10 +268,11 @@ export async function searchMISP(indicator: string) {
 
     return {
       matchCount: attrs.length,
+      title,
+      // confidence,
+      attributes: totalEventAttributes,
 
-      confidence,
-
-      score,
+      // score,
 
       threatLevel,
 
@@ -276,8 +312,6 @@ export async function searchMISP(indicator: string) {
 
       eventId: bestEvent?.id || null,
 
-      title,
-
       tags: tags.slice(0, 10),
 
       campaigns: campaigns.slice(0, 8),
@@ -289,8 +323,7 @@ export async function searchMISP(indicator: string) {
 
     return {
       matchCount: 0,
-      confidence: null,
-      score: 0,
+      title: null,
       threatLevel: null,
       sourceOrg: null,
       ownerOrg: null,
@@ -317,7 +350,6 @@ export async function searchMISP(indicator: string) {
 
       uuid: null,
       eventId: null,
-      title: null,
 
       tags: [],
       campaigns: [],
