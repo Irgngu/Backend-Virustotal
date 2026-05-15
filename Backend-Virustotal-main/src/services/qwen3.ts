@@ -116,26 +116,30 @@ function buildMitigationBlock(mitreData: any): string {
 function buildWHOISBlock(whoisData: any): string {
   if (!whoisData) return "No WHOIS data available.";
 
-  const { timestamps, ip_address, cti_source, author } = whoisData;
+  // DOMAIN WHOIS dari VirusTotal
+  if (whoisData.timestamps?.registered || whoisData.timestamps?.expiry) {
+    return [
+      `Timestamps:`,
+      `- Registered    : ${whoisData.timestamps?.registered ?? "-"}`,
+      `- Last Modified : ${whoisData.timestamps?.last_modified ?? "-"}`,
+      `- Expiry Date   : ${whoisData.timestamps?.expiry ?? "-"}`,
+      ``,
+      `Registrant Information:`,
+      `- Organization  : ${whoisData.author?.org_name ?? "-"}`,
+      `- Country       : ${whoisData.author?.country ?? "-"}`,
+    ].join("\n");
+  }
 
+  // IP WHOIS dari RIPE
   return [
-    `IP Range   : ${ip_address.range_start} - ${ip_address.range_end} (${ip_address.cidr ?? "-"})`,
-    ``,
     `Timestamps:`,
-    `- Registered : ${timestamps.inetnum_created ?? "-"}`,
-    `- Last Modified : ${timestamps.inetnum_last_modified ?? "-"}`,
-    `- Route Active  : ${timestamps.route_created ?? "-"}`,
-    ``,
-    `CTI Source : ${cti_source.source}${cti_source.filtered ? " (filtered)" : ""}`,
+    `- Registered    : ${whoisData.timestamps?.inetnum_created ?? "-"}`,
+    `- Last Modified : ${whoisData.timestamps?.inetnum_last_modified ?? "-"}`,
+    `- Route Active  : ${whoisData.timestamps?.route_created ?? "-"}`,
     ``,
     `Author / Owner:`,
-    `- Org Name  : ${author.org_name ?? "-"}`,
-    `- Org ID    : ${author.org_id ?? "-"}`,
-    `- Country   : ${author.country ?? "-"}`,
-    `- Maintainers: ${author.maintainers?.join(", ") ?? "-"}`,
-    `- Admin     : ${author.admin_contact ?? "-"}`,
-    `- Tech      : ${author.tech_contact ?? "-"}`,
-    `- Abuse Email: ${author.abuse_email ?? "-"}`,
+    `- Org Name      : ${whoisData.author?.org_name ?? "-"}`,
+    `- Country       : ${whoisData.author?.country ?? "-"}`,
   ].join("\n");
 }
 
