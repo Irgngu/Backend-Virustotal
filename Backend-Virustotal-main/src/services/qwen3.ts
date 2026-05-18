@@ -3,6 +3,7 @@ import OpenAI from "openai";
 // ══════════════════════════════════════════════════════
 // FORMATTER
 // ══════════════════════════════════════════════════════
+
 function formatReport(text: string): string {
   return text
     .replace(/\r\n/g, "\n")
@@ -15,8 +16,9 @@ function formatReport(text: string): string {
 }
 
 // ══════════════════════════════════════════════════════
-// CVE BLOCK (SUDAH SESUAI ENGINE KAMU)
+// CVE BLOCK
 // ══════════════════════════════════════════════════════
+
 function buildCVEBlock(cveMatches: any[], cveRiskScore: any): string {
   if (!cveMatches || cveMatches.length === 0) {
     return "No CVE correlation found.";
@@ -25,15 +27,75 @@ function buildCVEBlock(cveMatches: any[], cveRiskScore: any): string {
   const lines: string[] = [];
 
   lines.push(
-    `Total CVEs: ${cveMatches.length} | Highest CVSS: ${cveRiskScore?.highest_cvss ?? "N/A"} | Critical: ${cveRiskScore?.critical_count ?? 0} | Exploitable: ${cveRiskScore?.exploit_count ?? 0}`,
+    `Total CVEs: ${cveMatches.length} | Highest CVSS: ${
+      cveRiskScore?.highest_cvss ?? "N/A"
+    } | Critical: ${cveRiskScore?.critical_count ?? 0} | Exploitable: ${
+      cveRiskScore?.exploit_count ?? 0
+    }`,
   );
 
   lines.push("");
 
   cveMatches.slice(0, 5).forEach((c) => {
+    const detail = c.detail;
+
     lines.push(
-      `- ${c.cve_id} | CVSS ${c.detail?.cvss_score ?? "N/A"} (${c.detail?.cvss_severity ?? "UNKNOWN"}) | Exploit: ${c.detail?.exploit_available ? "YES" : "NO"}`,
+      `- ${c.cve_id} | CVSS ${detail?.cvss_score ?? "N/A"} (${
+        detail?.cvss_severity ?? "UNKNOWN"
+      }) | Exploit: ${detail?.exploit_available ? "YES" : "NO"} | Patch: ${
+        detail?.patch_available ? "YES" : "NO"
+      }`,
     );
+
+    if (detail?.description) {
+      lines.push(`  Description: ${detail.description}`);
+    }
+
+    if (detail?.affected_versions?.length > 0) {
+      lines.push("  Affected Versions:");
+
+      detail.affected_versions.slice(0, 5).forEach((v: any) => {
+        const versionRange: string[] = [];
+
+        if (v.version && v.version !== "*") {
+          versionRange.push(`Version: ${v.version}`);
+        }
+
+        if (v.versionStartIncluding) {
+          versionRange.push(`Start Including: ${v.versionStartIncluding}`);
+        }
+
+        if (v.versionEndIncluding) {
+          versionRange.push(`End Including: ${v.versionEndIncluding}`);
+        }
+
+        if (v.versionStartExcluding) {
+          versionRange.push(`Start Excluding: ${v.versionStartExcluding}`);
+        }
+
+        if (v.versionEndExcluding) {
+          versionRange.push(`End Excluding: ${v.versionEndExcluding}`);
+        }
+
+        lines.push(
+          `  - ${v.vendor} ${v.product} | ${
+            versionRange.length > 0 ? versionRange.join(" | ") : "Version: -"
+          }`,
+        );
+      });
+    }
+
+    if (detail?.remediation?.length > 0) {
+      lines.push("  Remediation / Patch References:");
+
+      detail.remediation.slice(0, 5).forEach((r: any) => {
+        lines.push(
+          `  - ${r.source} | ${r.url} | Tags: ${r.tags?.join(", ") || "-"}`,
+        );
+      });
+    }
+
+    lines.push("");
   });
 
   return lines.join("\n");
@@ -42,6 +104,7 @@ function buildCVEBlock(cveMatches: any[], cveRiskScore: any): string {
 // ══════════════════════════════════════════════════════
 // MISP BLOCK
 // ══════════════════════════════════════════════════════
+
 function buildMISPBlock(mispData: any): string {
   if (!mispData || mispData.matchCount === 0) {
     return "No MISP correlation found.";
@@ -52,13 +115,13 @@ function buildMISPBlock(mispData: any): string {
     `Confidence     : ${mispData.confidence}`,
     `Threat Level   : ${mispData.threatLevel}`,
     `Threat Actor   : ${mispData.threatActor ?? "Unknown"}`,
-    `Source Org     : ${mispData.sourceOrg ?? "-"}`, // ← TAMBAH
+    `Source Org     : ${mispData.sourceOrg ?? "-"}`,
     `Tags           : ${(mispData.tags || []).join(", ") || "-"}`,
   ].join("\n");
 }
 
 // ══════════════════════════════════════════════════════
-// 🔵 MITRE HELPERS (BARU)
+// MITRE BLOCK
 // ══════════════════════════════════════════════════════
 
 function buildMitreBlock(mitreData: any): string {
@@ -66,7 +129,6 @@ function buildMitreBlock(mitreData: any): string {
 
   const lines: string[] = [];
 
-  // PRIMARY TECHNIQUE
   if (mitreData.primaryTechnique) {
     lines.push(
       `Primary Technique: ${mitreData.primaryTechnique} - ${mitreData.primaryTechniqueName}`,
@@ -74,7 +136,6 @@ function buildMitreBlock(mitreData: any): string {
     lines.push("");
   }
 
-  // ALL MATCHED TECHNIQUES
   if (mitreData.techniques?.length > 0) {
     lines.push("Matched Techniques:");
 
@@ -85,7 +146,7 @@ function buildMitreBlock(mitreData: any): string {
 
       if (t.reasons?.length > 0) {
         t.reasons.forEach((r: string) => {
-          lines.push(`  • ${r}`);
+          lines.push(`  - ${r}`);
         });
       }
     });
@@ -95,6 +156,10 @@ function buildMitreBlock(mitreData: any): string {
 
   return lines.join("\n");
 }
+
+// ══════════════════════════════════════════════════════
+// MITIGATION BLOCK
+// ══════════════════════════════════════════════════════
 
 function buildMitigationBlock(mitreData: any): string {
   if (!mitreData?.mitigations || mitreData.mitigations.length === 0) {
@@ -113,10 +178,13 @@ function buildMitigationBlock(mitreData: any): string {
   return lines.join("\n");
 }
 
+// ══════════════════════════════════════════════════════
+// WHOIS BLOCK
+// ══════════════════════════════════════════════════════
+
 function buildWHOISBlock(whoisData: any): string {
   if (!whoisData) return "No WHOIS data available.";
 
-  // DOMAIN WHOIS dari VirusTotal
   if (whoisData.timestamps?.registered || whoisData.timestamps?.expiry) {
     return [
       `Timestamps:`,
@@ -130,7 +198,6 @@ function buildWHOISBlock(whoisData: any): string {
     ].join("\n");
   }
 
-  // IP WHOIS dari RIPE
   return [
     `Timestamps:`,
     `- Registered    : ${whoisData.timestamps?.inetnum_created ?? "-"}`,
@@ -142,6 +209,10 @@ function buildWHOISBlock(whoisData: any): string {
     `- Country       : ${whoisData.author?.country ?? "-"}`,
   ].join("\n");
 }
+
+// ══════════════════════════════════════════════════════
+// HISTORY BLOCK
+// ══════════════════════════════════════════════════════
 
 function buildHistoryBlock(history: any): string {
   if (!history) return "No history data available.";
@@ -155,6 +226,10 @@ function buildHistoryBlock(history: any): string {
   ].join("\n");
 }
 
+// ══════════════════════════════════════════════════════
+// PE HEADER BLOCK
+// ══════════════════════════════════════════════════════
+
 function buildPEHeaderBlock(pe_header: any): string {
   if (!pe_header) return "No PE header data available.";
 
@@ -165,6 +240,10 @@ function buildPEHeaderBlock(pe_header: any): string {
     `Contained Sections  : ${pe_header.contained_sections ?? "-"}`,
   ].join("\n");
 }
+
+// ══════════════════════════════════════════════════════
+// VIRUSTOTAL BLOCK
+// ══════════════════════════════════════════════════════
 
 function buildVTOverviewBlock(data: any): string {
   const {
@@ -190,6 +269,10 @@ function buildVTOverviewBlock(data: any): string {
   ].join("\n");
 }
 
+// ══════════════════════════════════════════════════════
+// ABUSEIPDB BLOCK
+// ══════════════════════════════════════════════════════
+
 function buildAbuseOverviewBlock(abuseipdb: any): string {
   if (!abuseipdb) return "No AbuseIPDB data available.";
 
@@ -205,12 +288,15 @@ function buildAbuseOverviewBlock(abuseipdb: any): string {
   ].join("\n");
 }
 
+// ══════════════════════════════════════════════════════
+// RETRY HELPER
+// ══════════════════════════════════════════════════════
+
 async function callWithRetry(fn: () => Promise<any>, retries = 3) {
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
       return await fn();
     } catch (err: any) {
-      // HANDLE RATE LIMIT
       if (err.status === 429 && attempt < retries - 1) {
         const waitTime = err?.error?.metadata?.retry_after_seconds
           ? err.error.metadata.retry_after_seconds * 1000
@@ -231,16 +317,17 @@ async function callWithRetry(fn: () => Promise<any>, retries = 3) {
     }
   }
 }
+
 // ══════════════════════════════════════════════════════
 // MAIN FUNCTION
 // ══════════════════════════════════════════════════════
+
 export async function generateReportAI(data: any) {
   const client = new OpenAI({
     baseURL: "https://openrouter.ai/api/v1",
     apiKey: process.env.OPENROUTER_API_KEY,
   });
 
-  // 🟢 [FIX ERROR DI SINI]
   const {
     indicator,
     type,
@@ -253,7 +340,6 @@ export async function generateReportAI(data: any) {
     totalVendors = 0,
 
     abuseScore = 0,
-    totalReports = 0,
 
     mispData = {},
 
@@ -262,13 +348,13 @@ export async function generateReportAI(data: any) {
 
     correlationInsights = "",
 
-    // 🔥 [BARU]
     mitreData,
     reportId,
-    whoisData = null, // ← TAMBAH INI
-    history = null, // ← TAMBAH
-    pe_header = null, // ← TAMBAH
-    abuseipdb = null, // ← TAMBAH
+
+    whoisData = null,
+    history = null,
+    pe_header = null,
+    abuseipdb = null,
   } = data;
 
   const detectionRate =
@@ -283,13 +369,12 @@ export async function generateReportAI(data: any) {
     100,
   );
 
-  const threatLevel =
-    confidence >= 70 ? "HIGH" : confidence >= 40 ? "MEDIUM" : "LOW";
-
   const now = new Date().toISOString();
 
   const cveBlock = buildCVEBlock(cveMatches, cveRiskScore);
+
   const mispBlock = buildMISPBlock(mispData);
+
   const vtOverviewBlock = buildVTOverviewBlock({
     indicator,
     type,
@@ -300,11 +385,17 @@ export async function generateReportAI(data: any) {
     totalVendors,
     detectionRate,
   });
+
   const abuseOverviewBlock = buildAbuseOverviewBlock(abuseipdb);
 
-  // ════════════════════════════════════════════════════
-  // PROMPT
-  // ════════════════════════════════════════════════════
+  const mitreBlock = buildMitreBlock(mitreData);
+  const mitigationBlock = buildMitigationBlock(mitreData);
+  const whoisBlock = buildWHOISBlock(whoisData);
+  const historyBlock = buildHistoryBlock(history);
+  const peHeaderBlock = buildPEHeaderBlock(pe_header);
+
+  const isFile = type === "file" || type?.startsWith("hash");
+
   const systemPrompt = `
 You are a cybersecurity analyst.
 Write a professional Threat Intelligence Report.
@@ -312,14 +403,8 @@ Use ONLY provided data.
 DO NOT include "Prepared by", "Contact", organization, or author info.
 Keep mitigation strategies AND MITRE ATT&CK ANALYSIS as single-line entries.
 Add all tags from MISP data.
-
+Use the provided CVE affected versions and remediation references if available.
 `;
-  const mitreBlock = buildMitreBlock(mitreData);
-  const mitigationBlock = buildMitigationBlock(mitreData);
-  const whoisBlock = buildWHOISBlock(whoisData);
-  const historyBlock = buildHistoryBlock(history);
-  const peHeaderBlock = buildPEHeaderBlock(pe_header);
-  const isFile = type === "file" || type?.startsWith("hash"); // ← TAMBAH DI SINI
 
   const userPrompt = `
 THREAT INTELLIGENCE REPORT
@@ -355,6 +440,13 @@ VULNERABILITY ANALYSIS
 
 ${cveBlock}
 
+Instruction:
+- Explain CVE severity, affected versions, vulnerable products, patch availability, and remediation references.
+- If remediation exists, mention that a vendor patch or advisory is available.
+- If affected version data exists, explain which product/version range is affected.
+- Do not invent versioning or remediation data.
+- Preserve all original remediation URLs exactly as provided.
+
 --------------------------------------------------
 
 THREAT INTELLIGENCE (MISP)
@@ -369,7 +461,6 @@ ${
 WHOIS INTELLIGENCE
 
 ${whoisBlock}
-
 `
     : ""
 }
@@ -388,10 +479,11 @@ ${historyBlock}
 PE HEADER ANALYSIS
 
 ${peHeaderBlock}
-
 `
     : ""
 }
+
+--------------------------------------------------
 
 MITRE ATT&CK ANALYSIS
 
@@ -408,14 +500,14 @@ ${mispData?.threatActor ?? "Unknown"}
 INDICATORS OF COMPROMISE
 
 | Type | Indicator | Confidence |
-|------|----------|-----------|
+|------|----------|------------|
 | ${type} | ${indicator} | ${confidence}/100 |
 
 --------------------------------------------------
 
 IMPACT ANALYSIS
 
-Explain impact based on CVE severity and MITRE techniques.
+Explain impact based on CVE severity, affected versions, exploit availability, and MITRE techniques.
 
 --------------------------------------------------
 
@@ -423,13 +515,18 @@ MITIGATION STRATEGIES
 
 ${mitigationBlock}
 
+Also include CVE remediation actions from NVD references when available.
+
 --------------------------------------------------
 
 COURSE OF ACTION
 
 - Block indicator
-- Monitor traffic
+- Monitor related traffic
+- Review affected product versions
+- Apply vendor patches if remediation references are available
 - Patch vulnerabilities
+- Monitor for exploitation attempts
 
 --------------------------------------------------
 
@@ -446,17 +543,20 @@ REFERENCES
 - MISP
 - NVD
 - MITRE ATT&CK
+- WHOIS
 `;
 
-  const completion = await client.chat.completions.create({
-    model: "qwen/qwen3-32b",
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt },
-    ],
-    temperature: 0.3,
-    max_tokens: 2500, // ← TAMBAH INI
-  });
+  const completion = await callWithRetry(() =>
+    client.chat.completions.create({
+      model: "qwen/qwen3-32b",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      temperature: 0.3,
+      max_tokens: 2500,
+    }),
+  );
 
   const raw = completion.choices?.[0]?.message?.content || "No response";
 

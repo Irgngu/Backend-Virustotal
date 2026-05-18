@@ -16,6 +16,23 @@ export interface CVEMetrics {
   availability_impact: string | null;
 }
 
+export interface AffectedVersion {
+  vendor: string;
+  product: string;
+  version: string;
+  criteria: string;
+  versionStartIncluding: string | null;
+  versionEndIncluding: string | null;
+  versionStartExcluding: string | null;
+  versionEndExcluding: string | null;
+}
+
+export interface RemediationInfo {
+  source: string;
+  url: string;
+  tags: string[];
+}
+
 export interface CVEDetail {
   cve_id: string;
   description: string;
@@ -25,6 +42,8 @@ export interface CVEDetail {
   cvss_metrics: CVEMetrics;
   cwe: string[];
   affected_products: string[];
+  affected_versions: AffectedVersion[];
+  remediation: RemediationInfo[];
   patch_available: boolean;
   patch_id: string | null;
   exploit_available: boolean;
@@ -34,13 +53,13 @@ export interface CVEDetail {
 
 export interface CVEMatchResult {
   cve_id: string;
-  source: string; // dari mana CVE ini terdeteksi
+  source: string;
   confidence: "HIGH" | "MEDIUM" | "LOW";
   detail: CVEDetail | null;
 }
 
 export interface CVERiskScore {
-  score: number; // 0-100 composite
+  score: number;
   highest_cvss: number;
   critical_count: number;
   high_count: number;
@@ -54,14 +73,15 @@ export interface CVERiskScore {
 
 export function extractCVEByRegex(text: string): string[] {
   if (!text) return [];
+
   const pattern = /CVE-\d{4}-\d{4,7}/gi;
   const matches = text.match(pattern) || [];
+
   return [...new Set(matches.map((c) => c.toUpperCase()))];
 }
 
 // ══════════════════════════════════════════════════════
 // EKSTRAK CVE DARI VIRUSTOTAL
-// Sesuai dengan struktur virustotal.ts yang sudah diperbarui
 // ══════════════════════════════════════════════════════
 
 export function extractCVEFromVT(vtResult: any): string[] {
@@ -69,11 +89,9 @@ export function extractCVEFromVT(vtResult: any): string[] {
 
   if (!vtResult) return cveList;
 
-  // 1. Dari cve_extracted yang sudah diparse di virustotal.ts
   const cveExtracted: string[] = vtResult?.virustotal?.cve_extracted || [];
   cveList.push(...cveExtracted);
 
-  // 2. Dari tags VT langsung
   const tags: string[] = vtResult?.virustotal?.tags || [];
   tags.forEach((tag: string) => {
     if (/^CVE-\d{4}-\d{4,7}$/i.test(tag)) {
@@ -81,21 +99,18 @@ export function extractCVEFromVT(vtResult: any): string[] {
     }
   });
 
-  // 3. Dari crowdsourced_context yang sudah diparse
   const crowdsourcedCtx = vtResult?.virustotal?.crowdsourced_context || [];
   crowdsourcedCtx.forEach((ctx: any) => {
     const found = ctx.cve || [];
     cveList.push(...found.map((c: string) => c.toUpperCase()));
   });
 
-  // 4. Dari sigma_analysis_results
   const sigmaResults = vtResult?.virustotal?.sigma_analysis_results || [];
   sigmaResults.forEach((sigma: any) => {
     const found = extractCVEByRegex(sigma.rule_title || "");
     cveList.push(...found);
   });
 
-  // 5. Dari vendor results (scan result strings)
   const vendors = vtResult?.vendors || [];
   vendors.forEach((vendor: any) => {
     const found = extractCVEByRegex(vendor.result || "");
@@ -107,8 +122,6 @@ export function extractCVEFromVT(vtResult: any): string[] {
 
 // ══════════════════════════════════════════════════════
 // EKSTRAK CVE DARI ABUSEIPDB
-// Sesuai dengan struktur abuseipdb.ts yang sudah diperbarui
-// recent_reports[].comment bisa mengandung CVE mention
 // ══════════════════════════════════════════════════════
 
 export function extractCVEFromAbuse(abuseipdb: any): string[] {
@@ -116,8 +129,8 @@ export function extractCVEFromAbuse(abuseipdb: any): string[] {
 
   if (!abuseipdb) return cveList;
 
-  // Dari recent_reports comments
   const reports = abuseipdb?.recent_reports || [];
+
   reports.forEach((report: any) => {
     const found = extractCVEByRegex(report.comment || "");
     cveList.push(...found);
@@ -128,8 +141,6 @@ export function extractCVEFromAbuse(abuseipdb: any): string[] {
 
 // ══════════════════════════════════════════════════════
 // EKSTRAK CVE DARI MISP
-// Sesuai dengan struktur misp.ts
-// tags bisa berisi "CVE-XXXX-XXXXX"
 // ══════════════════════════════════════════════════════
 
 export function extractCVEFromMISP(mispData: any): string[] {
@@ -137,21 +148,18 @@ export function extractCVEFromMISP(mispData: any): string[] {
 
   if (!mispData) return cveList;
 
-  // Dari tags MISP
   const tags: string[] = mispData?.tags || [];
   tags.forEach((tag: string) => {
     const found = extractCVEByRegex(tag);
     cveList.push(...found);
   });
 
-  // Dari campaigns (tags non-TLP)
   const campaigns: string[] = mispData?.campaigns || [];
   campaigns.forEach((tag: string) => {
     const found = extractCVEByRegex(tag);
     cveList.push(...found);
   });
 
-  // Dari title event MISP
   const title = mispData?.title || "";
   const foundInTitle = extractCVEByRegex(title);
   cveList.push(...foundInTitle);
@@ -160,7 +168,61 @@ export function extractCVEFromMISP(mispData: any): string[] {
 }
 
 // ══════════════════════════════════════════════════════
-// NVD API — Ambil detail lengkap per CVE
+// PARSE AFFECTED VERSION DARI NVD CPE
+// ══════════════════════════════════════════════════════
+
+function parseAffectedVersions(configurations: any[] = []): AffectedVersion[] {
+  const affectedVersions: AffectedVersion[] = [];
+
+  configurations.forEach((config: any) => {
+    (config.nodes || []).forEach((node: any) => {
+      (node.cpeMatch || []).forEach((cpe: any) => {
+        if (!cpe.vulnerable || !cpe.criteria) return;
+
+        const parts = cpe.criteria.split(":");
+
+        affectedVersions.push({
+          vendor: parts[3] || "-",
+          product: parts[4] || "-",
+          version: parts[5] || "-",
+          criteria: cpe.criteria,
+          versionStartIncluding: cpe.versionStartIncluding ?? null,
+          versionEndIncluding: cpe.versionEndIncluding ?? null,
+          versionStartExcluding: cpe.versionStartExcluding ?? null,
+          versionEndExcluding: cpe.versionEndExcluding ?? null,
+        });
+      });
+    });
+  });
+
+  return affectedVersions;
+}
+
+// ══════════════════════════════════════════════════════
+// PARSE REMEDIATION / PATCH DARI NVD REFERENCES
+// ══════════════════════════════════════════════════════
+
+function parseRemediation(references: any[] = []): RemediationInfo[] {
+  return references
+    .filter((ref: any) => {
+      const tags: string[] = ref.tags || [];
+
+      return (
+        tags.includes("Patch") ||
+        tags.includes("Vendor Advisory") ||
+        tags.includes("Release Notes") ||
+        tags.includes("Mitigation")
+      );
+    })
+    .map((ref: any) => ({
+      source: ref.source || "Unknown",
+      url: ref.url || "-",
+      tags: ref.tags || [],
+    }));
+}
+
+// ══════════════════════════════════════════════════════
+// NVD API — AMBIL DETAIL CVE
 // ══════════════════════════════════════════════════════
 
 export async function fetchCVEFromNVD(
@@ -177,9 +239,10 @@ export async function fetchCVEFromNVD(
       headers["apiKey"] = NVD_API_KEY;
     }
 
-    // Rate limit: NVD free = 5 req/30s, with key = 50 req/30s
     const res = await fetch(
-      `https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=${encodeURIComponent(cveId)}`,
+      `https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=${encodeURIComponent(
+        cveId,
+      )}`,
       { headers },
     );
 
@@ -193,13 +256,11 @@ export async function fetchCVEFromNVD(
 
     if (!vuln) return null;
 
-    // Ambil CVSS v3.1, fallback v3.0, fallback v2
     const cvssV3 =
       vuln.metrics?.cvssMetricV31?.[0]?.cvssData ||
       vuln.metrics?.cvssMetricV30?.[0]?.cvssData ||
       null;
 
-    // CWE list
     const cweList: string[] = (vuln.weaknesses || [])
       .flatMap((w: any) =>
         (w.description || [])
@@ -208,51 +269,38 @@ export async function fetchCVEFromNVD(
       )
       .filter(Boolean);
 
-    // Affected products dari CPE
     const affectedProducts: string[] = [];
-    (vuln.configurations || []).forEach((config: any) => {
-      (config.nodes || []).forEach((node: any) => {
-        (node.cpeMatch || []).forEach((cpe: any) => {
-          if (cpe.vulnerable && cpe.criteria) {
-            const parts = cpe.criteria.split(":");
-            if (parts.length >= 5) {
-              const productStr = [
-                parts[3],
-                parts[4],
-                parts[5] !== "*" ? parts[5] : "",
-              ]
-                .filter(Boolean)
-                .join(" ")
-                .trim();
-              if (productStr) affectedProducts.push(productStr);
-            }
-          }
-        });
-      });
+    const affectedVersions = parseAffectedVersions(vuln.configurations || []);
+
+    affectedVersions.forEach((item) => {
+      const productStr = `${item.vendor} ${item.product}`.trim();
+      if (productStr) affectedProducts.push(productStr);
     });
 
-    // Patch & exploit dari references
     const references = vuln.references || [];
-    const hasPatch = references.some(
-      (ref: any) =>
-        ref.tags?.includes("Patch") || ref.tags?.includes("Vendor Advisory"),
-    );
+    const remediation = parseRemediation(references);
+
+    const hasPatch = remediation.length > 0;
+
     const hasExploit = references.some(
       (ref: any) =>
         ref.tags?.includes("Exploit") ||
-        (ref.url || "").includes("exploit-db") ||
-        (ref.url || "").includes("poc") ||
-        (ref.url || "").includes("github.com/exploit"),
+        (ref.url || "").toLowerCase().includes("exploit-db") ||
+        (ref.url || "").toLowerCase().includes("poc") ||
+        (ref.url || "").toLowerCase().includes("github.com/exploit"),
     );
 
     return {
       cve_id: cveId,
+
       description:
         vuln.descriptions?.find((d: any) => d.lang === "en")?.value ||
         "No description available",
+
       cvss_score: cvssV3?.baseScore ?? null,
       cvss_severity: cvssV3?.baseSeverity ?? null,
       cvss_vector: cvssV3?.vectorString ?? null,
+
       cvss_metrics: {
         attack_vector: cvssV3?.attackVector ?? null,
         attack_complexity: cvssV3?.attackComplexity ?? null,
@@ -263,11 +311,20 @@ export async function fetchCVEFromNVD(
         integrity_impact: cvssV3?.integrityImpact ?? null,
         availability_impact: cvssV3?.availabilityImpact ?? null,
       },
+
       cwe: [...new Set(cweList)],
+
       affected_products: [...new Set(affectedProducts)].slice(0, 8),
+
+      affected_versions: affectedVersions.slice(0, 10),
+
+      remediation: remediation.slice(0, 8),
+
       patch_available: hasPatch,
       patch_id: null,
+
       exploit_available: hasExploit,
+
       published_date: vuln.published ?? null,
       last_modified: vuln.lastModified ?? null,
     };
@@ -278,7 +335,7 @@ export async function fetchCVEFromNVD(
 }
 
 // ══════════════════════════════════════════════════════
-// MASTER FUNCTION: Jalankan semua sumber → enrich NVD
+// MASTER FUNCTION
 // ══════════════════════════════════════════════════════
 
 export async function matchCVE(params: {
@@ -288,12 +345,10 @@ export async function matchCVE(params: {
 }): Promise<CVEMatchResult[]> {
   const cveMap = new Map<string, CVEMatchResult>();
 
-  // Kumpulkan dari semua sumber
   const fromVT = extractCVEFromVT(params.vtResult);
   const fromAbuse = extractCVEFromAbuse(params.abuseipdb);
   const fromMISP = extractCVEFromMISP(params.mispData);
 
-  // VT → confidence HIGH (langsung dari vendor tags)
   fromVT.forEach((cve) => {
     cveMap.set(cve, {
       cve_id: cve,
@@ -303,7 +358,6 @@ export async function matchCVE(params: {
     });
   });
 
-  // AbuseIPDB → confidence MEDIUM (dari comment report)
   fromAbuse.forEach((cve) => {
     if (!cveMap.has(cve)) {
       cveMap.set(cve, {
@@ -318,7 +372,6 @@ export async function matchCVE(params: {
     }
   });
 
-  // MISP → confidence HIGH (komunitas terverifikasi)
   fromMISP.forEach((cve) => {
     if (!cveMap.has(cve)) {
       cveMap.set(cve, {
@@ -330,13 +383,12 @@ export async function matchCVE(params: {
     } else {
       const existing = cveMap.get(cve)!;
       existing.source += " + MISP";
-      existing.confidence = "HIGH"; // multi-source = HIGH
+      existing.confidence = "HIGH";
     }
   });
 
   if (cveMap.size === 0) return [];
 
-  // Enrich dengan NVD — parallel, max 5 CVE (rate limit NVD)
   const cveList = [...cveMap.values()].slice(0, 5);
 
   const enriched = await Promise.allSettled(
@@ -350,11 +402,12 @@ export async function matchCVE(params: {
     .filter((r) => r.status === "fulfilled")
     .map((r) => (r as PromiseFulfilledResult<CVEMatchResult>).value);
 
-  // Sort: CVSS tertinggi dulu, lalu alphabetical
   results.sort((a, b) => {
     const scoreA = a.detail?.cvss_score ?? 0;
     const scoreB = b.detail?.cvss_score ?? 0;
+
     if (scoreB !== scoreA) return scoreB - scoreA;
+
     return a.cve_id.localeCompare(b.cve_id);
   });
 
@@ -384,26 +437,29 @@ export function calculateCVERiskScore(
     .filter((s) => s > 0);
 
   const highest_cvss = Math.max(...cvssScores, 0);
+
   const critical_count = cveResults.filter(
     (c) => c.detail?.cvss_severity === "CRITICAL",
   ).length;
+
   const high_count = cveResults.filter(
     (c) => c.detail?.cvss_severity === "HIGH",
   ).length;
+
   const medium_count = cveResults.filter(
     (c) => c.detail?.cvss_severity === "MEDIUM",
   ).length;
+
   const exploit_count = cveResults.filter(
     (c) => c.detail?.exploit_available === true,
   ).length;
 
-  // Composite score (0-100)
   const score = Math.min(
     100,
-    (highest_cvss / 10) * 50 + // CVSS weight 50%
-      critical_count * 15 + // Critical bonus 15 per CVE
-      high_count * 8 + // High bonus 8 per CVE
-      exploit_count * 12, // Exploit bonus 12 per CVE
+    (highest_cvss / 10) * 50 +
+      critical_count * 15 +
+      high_count * 8 +
+      exploit_count * 12,
   );
 
   return {

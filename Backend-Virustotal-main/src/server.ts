@@ -28,6 +28,7 @@ import {
   type CVERiskScore,
 } from "./services/cve.js";
 import { fetchWHOIS, parseDomainWHOIS } from "./services/whois.js";
+import { generateOpenCTISTIX21 } from "./services/stix.js";
 /* ===============================
    CORE
 ============================== */
@@ -248,6 +249,35 @@ app.post("/chat", async (c) => {
     const mergedTags = [...(mispData?.tags ?? []), ...vtTags];
     const uniqueTags = [...new Set(mergedTags)];
 
+    // ── ABUSEIPDB TAGS ─────────────────────────────
+    const abuseTags: string[] = [];
+
+    if (abuseipdb?.recent_reports) {
+      abuseipdb.recent_reports.forEach((report: any) => {
+        if (Array.isArray(report.categories)) {
+          report.categories.forEach((id: number) => {
+            const category = CATEGORY_MAP[id];
+
+            if (category) {
+              abuseTags.push(
+                String(category).toLowerCase().replace(/\s+/g, "-"),
+              );
+            }
+          });
+        }
+      });
+    }
+
+    // ── MISP TAGS ─────────────────────────────
+    const mispTags: string[] = Array.isArray(mispData?.tags)
+      ? mispData.tags.map((t: string) =>
+          String(t)
+            .toLowerCase()
+            .trim()
+            .replace(/[_\s]+/g, "-"),
+        )
+      : [];
+
     function normalizeTags(tags: string[] = []): string[] {
       return [
         ...new Set(
@@ -262,6 +292,19 @@ app.post("/chat", async (c) => {
         ),
       ];
     }
+
+    // ── FINAL TAG GROUPING ─────────────────────────────
+    const finalVirusTotalTags = normalizeTags(vtTags);
+
+    const finalAbuseIPDBTags = normalizeTags(abuseTags);
+
+    const finalMISPTags = normalizeTags(mispTags);
+
+    const allCombinedTags = normalizeTags([
+      ...finalVirusTotalTags,
+      ...finalAbuseIPDBTags,
+      ...finalMISPTags,
+    ]);
 
     function extractVendorTags(result: string): string[] {
       const text = result.toLowerCase();
@@ -371,14 +414,7 @@ app.post("/chat", async (c) => {
     ────────────────────────────── */
     const normalized = {
       type,
-      tags: normalizeTags([
-        ...uniqueTags,
-        ...(abuseipdb?.recent_reports?.flatMap((r: any) =>
-          (r.categories ?? [])
-            .map((id: number) => CATEGORY_MAP[id])
-            .filter(Boolean),
-        ) ?? []),
-      ]),
+      tags: allCombinedTags,
     };
 
     const threatIntel = await analyzeThreatToMitigation(normalized);
@@ -393,15 +429,15 @@ app.post("/chat", async (c) => {
     ];
     const mitreName = threatIntel.primaryTechniqueName;
 
-    /* ──────────────────────────────
-       9. EXPLAINABILITY
-    ────────────────────────────── */
-    const reasoning = [
-      `VT detections: ${malicious}/${totalVendors}`,
-      `Abuse score: ${abuseScore}%`,
-      `MISP threat level: ${mispData?.threatLevel || "Low"}`,
-      `CVE matches: ${cveMatches.length} (risk score: ${cveRiskScore.score}/100)`,
-    ].join("\n");
+    // /* ──────────────────────────────
+    //    9. EXPLAINABILITY
+    // ────────────────────────────── */
+    // const reasoning = [
+    //   `VT detections: ${malicious}/${totalVendors}`,
+    //   `Abuse score: ${abuseScore}%`,
+    //   `MISP threat level: ${mispData?.threatLevel || "Low"}`,
+    //   `CVE matches: ${cveMatches.length} (risk score: ${cveRiskScore.score}/100)`,
+    // ].join("\n");
 
     /* ──────────────────────────────
        10. CORRELATION ENGINE
@@ -472,7 +508,7 @@ app.post("/chat", async (c) => {
       vtData: vt,
       abuseipdb,
       mispData,
-      reasoning,
+      // reasoning,
       cve: threatIntel.cve,
       cwe: threatIntel.cwe,
       mitreMitigations: threatIntel.mitigations,
@@ -486,6 +522,12 @@ app.post("/chat", async (c) => {
       whoisData,
       history: vt.virustotal?.history ?? null, // ← TAMBAH
       pe_header: vt.virustotal?.pe_header ?? null, // ← TAMBAH
+      tags: {
+        virustotal: finalVirusTotalTags,
+        abuseipdb: finalAbuseIPDBTags,
+        misp: finalMISPTags,
+        combined: allCombinedTags,
+      },
     });
   } catch (err) {
     console.error(err);
@@ -603,6 +645,32 @@ app.post("/check-ip", async (c) => {
     return c.json(
       {
         error: "Failed to check IP reputation",
+      },
+      500,
+    );
+  }
+});
+
+/* ===============================
+   EXPORT STIX 2.1 JSON
+============================== */
+app.post("/export/stix", async (c) => {
+  try {
+    const body = await c.req.json();
+
+    const stixBundle = generateOpenCTISTIX21(body);
+
+    return c.json(stixBundle, 200, {
+      "Content-Type": "application/json",
+      "Content-Disposition": `attachment; filename="opencti-stix-${body.reportId || "report"}.json"`,
+    });
+  } catch (error: any) {
+    console.error("[STIX EXPORT ERROR]", error);
+
+    return c.json(
+      {
+        error: "Failed to export STIX 2.1 JSON",
+        details: error.message,
       },
       500,
     );
