@@ -1,411 +1,457 @@
 import OpenAI from "openai";
-import { randomUUID } from "crypto";
-import type { CVEMatchResult, CVERiskScore } from "../services/cve.js";
 
 // ══════════════════════════════════════════════════════
 // FORMATTER
 // ══════════════════════════════════════════════════════
-//BARU
-function removeDuplicateLines(text: string): string {
-  const seen = new Set<string>();
-  const result: string[] = [];
-
-  for (let line of text.split("\n")) {
-    const clean = line.trim().toLowerCase();
-
-    if (!clean) {
-      result.push("");
-      continue;
-    }
-
-    if (seen.has(clean)) continue;
-
-    seen.add(clean);
-    result.push(line);
-  }
-
-  return result.join("\n");
-}
 function formatReport(text: string): string {
-  return (
-    text
-      .replace(/\r\n/g, "\n")
-      .replace(/\n{3,}/g, "\n\n")
-
-      // 🔥 REMOVE BOLD MARKDOWN (**text**)
-      .replace(/\*\*(.*?)\*\*/g, "$1")
-
-      // remove emoji
-      .replace(/[\u{1F300}-\u{1FAFF}]/gu, "")
-
-      // remove non-ascii
-      .replace(/[^\x00-\x7F]+/g, "")
-
-      // remove duplicate lines
-      .replace(/\n(.+)\n\1/g, "\n$1")
-
-      // normalize separator
-      .replace(/-{3,}/g, "---")
-
-      .replace(/[ \t]+$/gm, "")
-      .trim()
-  );
+  return text
+    .replace(/\r\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/[^\x00-\x7F]+/g, "")
+    .replace(/\n(.+)\n\1/g, "\n$1")
+    .replace(/-{3,}/g, "---")
+    .trim();
 }
 
 // ══════════════════════════════════════════════════════
-// HELPERS
+// CVE BLOCK (SUDAH SESUAI ENGINE KAMU)
 // ══════════════════════════════════════════════════════
-
-function buildSTIXPattern(indicator: string, type: string): string {
-  const t = type?.toLowerCase();
-  if (t === "ip" || t === "ip-address")
-    return `[ipv4-addr:value = '${indicator}']`;
-  if (t === "domain") return `[domain-name:value = '${indicator}']`;
-  if (t === "url") return `[url:value = '${indicator}']`;
-  if (t === "hash" || t === "file") {
-    if (indicator.length === 32) return `[file:hashes.MD5 = '${indicator}']`;
-    if (indicator.length === 40)
-      return `[file:hashes.'SHA-1' = '${indicator}']`;
-    return `[file:hashes.'SHA-256' = '${indicator}']`;
-  }
-  return `[${type}:value = '${indicator}']`;
-}
-
-function buildSTIXConfidence(
-  malicious: number,
-  totalVendors: number,
-  abuseScore: number,
-  cveScore: number,
-  mispScore: number,
-): number {
-  const vtRatio = totalVendors > 0 ? (malicious / totalVendors) * 100 : 0;
-  const score =
-    vtRatio * 0.4 + abuseScore * 0.25 + cveScore * 0.2 + mispScore * 0.15;
-  return Math.min(Math.round(score), 100);
-}
-
-function resolveTLP(confidence: number, mispTlp: string | null): string {
-  if (mispTlp) return `TLP:${mispTlp.toUpperCase()}`;
-  if (confidence >= 70) return "TLP:AMBER";
-  if (confidence >= 40) return "TLP:GREEN";
-  return "TLP:CLEAR";
-}
-
-function resolveThreatLevel(
-  confidence: number,
-  hasCriticalCVE: boolean,
-  hasExploit: boolean,
-): string {
-  if (confidence >= 70 || (hasCriticalCVE && hasExploit)) return "HIGH";
-  if (confidence >= 40) return "MEDIUM";
-  return "LOW";
-}
-
-// ── Build CVE summary block for prompt ────────────────
-function buildCVEBlock(
-  cveMatches: CVEMatchResult[],
-  cveRiskScore: CVERiskScore | null,
-): string {
+function buildCVEBlock(cveMatches: any[], cveRiskScore: any): string {
   if (!cveMatches || cveMatches.length === 0) {
-    return "No CVE correlation found for this indicator.";
+    return "No CVE correlation found.";
   }
 
   const lines: string[] = [];
-  const criticals = cveMatches.filter(
-    (c) => c.detail?.cvss_severity === "CRITICAL",
-  );
-  const highs = cveMatches.filter((c) => c.detail?.cvss_severity === "HIGH");
-  const exploitables = cveMatches.filter(
-    (c) => c.detail?.exploit_available === true,
-  );
 
   lines.push(
-    `Total CVEs linked: ${cveMatches.length} | Highest CVSS: ${cveRiskScore?.highest_cvss ?? "N/A"} | Critical: ${cveRiskScore?.critical_count ?? 0} | Exploitable: ${cveRiskScore?.exploit_count ?? 0}`,
+    `Total CVEs: ${cveMatches.length} | Highest CVSS: ${cveRiskScore?.highest_cvss ?? "N/A"} | Critical: ${cveRiskScore?.critical_count ?? 0} | Exploitable: ${cveRiskScore?.exploit_count ?? 0}`,
   );
+
   lines.push("");
 
   cveMatches.slice(0, 5).forEach((c) => {
-    const score = c.detail?.cvss_score ?? "N/A";
-    const sev = c.detail?.cvss_severity ?? "UNKNOWN";
-    const vector = c.detail?.cvss_metrics?.attack_vector ?? "N/A";
-    const exploit = c.detail?.exploit_available
-      ? "PUBLIC EXPLOIT AVAILABLE"
-      : "No public exploit";
-    const patch = c.detail?.patch_available
-      ? "Patch available"
-      : "No patch yet";
     lines.push(
-      `  - ${c.cve_id} | CVSS ${score} (${sev}) | Attack Vector: ${vector} | ${exploit} | ${patch} | Source: ${c.source}`,
+      `- ${c.cve_id} | CVSS ${c.detail?.cvss_score ?? "N/A"} (${c.detail?.cvss_severity ?? "UNKNOWN"}) | Exploit: ${c.detail?.exploit_available ? "YES" : "NO"}`,
     );
   });
 
-  if (cveMatches.length > 5) {
-    lines.push(`  - ...and ${cveMatches.length - 5} more CVE(s).`);
+  return lines.join("\n");
+}
+
+// ══════════════════════════════════════════════════════
+// MISP BLOCK
+// ══════════════════════════════════════════════════════
+function buildMISPBlock(mispData: any): string {
+  if (!mispData || mispData.matchCount === 0) {
+    return "No MISP correlation found.";
   }
 
-  if (exploitables.length > 0) {
+  return [
+    `Matched Events : ${mispData.matchCount}`,
+    `Confidence     : ${mispData.confidence}`,
+    `Threat Level   : ${mispData.threatLevel}`,
+    `Threat Actor   : ${mispData.threatActor ?? "Unknown"}`,
+    `Source Org     : ${mispData.sourceOrg ?? "-"}`, // ← TAMBAH
+    `Tags           : ${(mispData.tags || []).join(", ") || "-"}`,
+  ].join("\n");
+}
+
+// ══════════════════════════════════════════════════════
+// 🔵 MITRE HELPERS (BARU)
+// ══════════════════════════════════════════════════════
+
+function buildMitreBlock(mitreData: any): string {
+  if (!mitreData) return "No MITRE ATT&CK data available.";
+
+  const lines: string[] = [];
+
+  // PRIMARY TECHNIQUE
+  if (mitreData.primaryTechnique) {
     lines.push(
-      `\n  Active exploit IDs: ${exploitables.map((c) => c.cve_id).join(", ")}`,
+      `Primary Technique: ${mitreData.primaryTechnique} - ${mitreData.primaryTechniqueName}`,
     );
+    lines.push("");
+  }
+
+  // ALL MATCHED TECHNIQUES
+  if (mitreData.techniques?.length > 0) {
+    lines.push("Matched Techniques:");
+
+    mitreData.techniques.forEach((t: any) => {
+      lines.push(
+        `- ${t.technique} (${t.techniqueName}) | Confidence: ${t.confidence}%`,
+      );
+
+      if (t.reasons?.length > 0) {
+        t.reasons.forEach((r: string) => {
+          lines.push(`  • ${r}`);
+        });
+      }
+    });
+
+    lines.push("");
   }
 
   return lines.join("\n");
 }
 
-// ── Build MISP block for prompt ───────────────────────
-function buildMISPBlock(mispData: Record<string, any>): string {
-  if (!mispData || (mispData.matchCount ?? 0) === 0) {
-    return "No matches found in MISP — no known association with tracked campaigns.";
+function buildMitigationBlock(mitreData: any): string {
+  if (!mitreData?.mitigations || mitreData.mitigations.length === 0) {
+    return "No mitigation strategies available.";
   }
+
+  const lines: string[] = [];
+
+  mitreData.mitigations.forEach((m: any) => {
+    lines.push(`- ${m.name} (${m.id})`);
+    lines.push(`  ${m.description}`);
+    lines.push(`  Framework: ${m.framework}`);
+    lines.push("");
+  });
+
+  return lines.join("\n");
+}
+
+function buildWHOISBlock(whoisData: any): string {
+  if (!whoisData) return "No WHOIS data available.";
+
+  const { timestamps, ip_address, cti_source, author } = whoisData;
+
   return [
-    `Matched Events : ${mispData.matchCount}`,
-    `Confidence     : ${mispData.confidence ?? "N/A"}`,
-    `Threat Level   : ${mispData.threatLevel ?? "N/A"}`,
-    `Threat Actor   : ${mispData.threatActor ?? "Unknown"}`,
-    `Tags           : ${(mispData.tags ?? []).join(", ") || "None"}`,
-    `MISP Score     : ${mispData.score ?? 0}`,
+    `IP Range   : ${ip_address.range_start} - ${ip_address.range_end} (${ip_address.cidr ?? "-"})`,
+    ``,
+    `Timestamps:`,
+    `- Registered : ${timestamps.inetnum_created ?? "-"}`,
+    `- Last Modified : ${timestamps.inetnum_last_modified ?? "-"}`,
+    `- Route Active  : ${timestamps.route_created ?? "-"}`,
+    ``,
+    `CTI Source : ${cti_source.source}${cti_source.filtered ? " (filtered)" : ""}`,
+    ``,
+    `Author / Owner:`,
+    `- Org Name  : ${author.org_name ?? "-"}`,
+    `- Org ID    : ${author.org_id ?? "-"}`,
+    `- Country   : ${author.country ?? "-"}`,
+    `- Maintainers: ${author.maintainers?.join(", ") ?? "-"}`,
+    `- Admin     : ${author.admin_contact ?? "-"}`,
+    `- Tech      : ${author.tech_contact ?? "-"}`,
+    `- Abuse Email: ${author.abuse_email ?? "-"}`,
   ].join("\n");
 }
 
+function buildHistoryBlock(history: any): string {
+  if (!history) return "No history data available.";
+
+  return [
+    `Creation Time    : ${history.creation_time ?? "-"}`,
+    `First Seen (ITW) : ${history.first_seen_itw ?? "-"}`,
+    `First Submission : ${history.first_submission ?? "-"}`,
+    `Last Submission  : ${history.last_submission ?? "-"}`,
+    `Last Analysis    : ${history.last_analysis ?? "-"}`,
+  ].join("\n");
+}
+
+function buildPEHeaderBlock(pe_header: any): string {
+  if (!pe_header) return "No PE header data available.";
+
+  return [
+    `Target Machine      : ${pe_header.target_machine ?? "-"}`,
+    `Compilation Time    : ${pe_header.compilation_timestamp ?? "-"}`,
+    `Entry Point         : ${pe_header.entry_point ?? "-"}`,
+    `Contained Sections  : ${pe_header.contained_sections ?? "-"}`,
+  ].join("\n");
+}
+
+function buildVTOverviewBlock(data: any): string {
+  const {
+    indicator,
+    type,
+    malicious,
+    suspicious,
+    harmless,
+    undetected,
+    totalVendors,
+    detectionRate,
+  } = data;
+
+  return [
+    `Indicator        : ${indicator}`,
+    `Type             : ${type}`,
+    `Malicious        : ${malicious}`,
+    `Suspicious       : ${suspicious}`,
+    `Harmless         : ${harmless}`,
+    `Undetected       : ${undetected}`,
+    `Total Vendors    : ${totalVendors}`,
+    `Detection Rate   : ${detectionRate}%`,
+  ].join("\n");
+}
+
+function buildAbuseOverviewBlock(abuseipdb: any): string {
+  if (!abuseipdb) return "No AbuseIPDB data available.";
+
+  return [
+    `IP Version       : IPv${abuseipdb.ip_version ?? "-"}`,
+    `Abuse Score      : ${abuseipdb.abuse_confidence_score ?? 0}%`,
+    `Total Reports    : ${abuseipdb.total_reports ?? 0}`,
+    `Distinct Users   : ${abuseipdb.numDistinctUsers ?? 0}`,
+    `Country          : ${abuseipdb.country_code ?? "-"}`,
+    `ISP              : ${abuseipdb.isp ?? "-"}`,
+    `Usage Type       : ${abuseipdb.usage_type ?? "-"}`,
+    `Last Reported    : ${abuseipdb.last_reported_at ?? "-"}`,
+  ].join("\n");
+}
+
+async function callWithRetry(fn: () => Promise<any>, retries = 3) {
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      // HANDLE RATE LIMIT
+      if (err.status === 429 && attempt < retries - 1) {
+        const waitTime = err?.error?.metadata?.retry_after_seconds
+          ? err.error.metadata.retry_after_seconds * 1000
+          : 30000;
+
+        console.log(
+          `[AI] Rate limited. Retry in ${waitTime / 1000} seconds...`,
+        );
+
+        await new Promise((resolve) => setTimeout(resolve, waitTime));
+
+        continue;
+      }
+
+      console.error("[AI ERROR]", err);
+
+      throw err;
+    }
+  }
+}
 // ══════════════════════════════════════════════════════
 // MAIN FUNCTION
 // ══════════════════════════════════════════════════════
-
 export async function generateReportAI(data: any) {
+    console.log(
+    "OPENROUTER KEY:",
+    process.env.OPENROUTER_API_KEY ? "LOADED" : "MISSING"
+  );
+  const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY?.trim();
+
+  if (!OPENROUTER_API_KEY) {
+    throw new Error("OPENROUTER_API_KEY tidak terbaca dari .env");
+  }
+
   const client = new OpenAI({
     baseURL: "https://openrouter.ai/api/v1",
-    apiKey: process.env.OPENROUTER_API_KEY,
+    apiKey: OPENROUTER_API_KEY,
   });
 
+  // 🟢 [FIX ERROR DI SINI]
   const {
-    type,
     indicator,
+    type,
+
     malicious = 0,
     suspicious = 0,
     harmless = 0,
     undetected = 0,
+
+    totalVendors = 0,
+
     abuseScore = 0,
     totalReports = 0,
-    totalVendors: tv = 0,
+
     mispData = {},
-    cveRiskScore = null,
+
     cveMatches = [],
-    // Optional: caller can pre-compute correlation text
-    correlationInsights = null,
-    // Report metadata
-    source = "VirusTotal, AbuseIPDB, MISP, NVD",
-    preparedBy = "Threat Intelligence Team",
-    appendix = "-",
+    cveRiskScore = null,
+
+    correlationInsights = "",
+
+    // 🔥 [BARU]
+    mitreData,
+    reportId,
+    whoisData = null, // ← TAMBAH INI
+    history = null, // ← TAMBAH
+    pe_header = null, // ← TAMBAH
+    abuseipdb = null, // ← TAMBAH
   } = data;
 
-  const totalVendors = tv || malicious + suspicious + harmless + undetected;
   const detectionRate =
-    totalVendors > 0 ? ((malicious / totalVendors) * 100).toFixed(1) : "0.0";
-  const vtRatio = totalVendors > 0 ? malicious / totalVendors : 0;
+    totalVendors > 0 ? ((malicious / totalVendors) * 100).toFixed(1) : "0";
 
-  const now = new Date();
-  const reportDate = now.toLocaleDateString("en-GB", {
-    day: "2-digit",
-    month: "long",
-    year: "numeric",
-  });
-  const nowISO = now.toISOString();
-
-  const bundleId = `bundle--${randomUUID()}`;
-  const reportId = `report--${randomUUID()}`;
-  const indicatorId = `indicator--${randomUUID()}`;
-  const relationshipId = `relationship--${randomUUID()}`;
-
-  const stixPattern = buildSTIXPattern(indicator, type);
-  const stixConfidence = buildSTIXConfidence(
-    malicious,
-    totalVendors,
-    abuseScore,
-    cveRiskScore?.score ?? 0,
-    mispData?.score ?? 0,
+  const confidence = Math.min(
+    Math.round(
+      (malicious / Math.max(totalVendors, 1)) * 100 * 0.5 +
+        abuseScore * 0.3 +
+        (mispData.score || 0) * 0.2,
+    ),
+    100,
   );
-  const tlp = resolveTLP(stixConfidence, mispData?.tlp ?? null);
-  const hasCriticalCVE = (cveRiskScore?.critical_count ?? 0) > 0;
-  const hasExploit = (cveRiskScore?.exploit_count ?? 0) > 0;
-  const threatLevel = resolveThreatLevel(
-    stixConfidence,
-    hasCriticalCVE,
-    hasExploit,
-  );
+
+  const threatLevel =
+    confidence >= 70 ? "HIGH" : confidence >= 40 ? "MEDIUM" : "LOW";
+
+  const now = new Date().toISOString();
 
   const cveBlock = buildCVEBlock(cveMatches, cveRiskScore);
   const mispBlock = buildMISPBlock(mispData);
-  console.log("[DEBUG] cveMatches:", JSON.stringify(cveMatches, null, 2));
-  console.log("[DEBUG] cveBlock:", cveBlock);
+  const vtOverviewBlock = buildVTOverviewBlock({
+    indicator,
+    type,
+    malicious,
+    suspicious,
+    harmless,
+    undetected,
+    totalVendors,
+    detectionRate,
+  });
+  const abuseOverviewBlock = buildAbuseOverviewBlock(abuseipdb);
 
   // ════════════════════════════════════════════════════
-  // SYSTEM PROMPT
+  // PROMPT
   // ════════════════════════════════════════════════════
+  const systemPrompt = `
+You are a cybersecurity analyst.
+Write a professional Threat Intelligence Report.
+Use ONLY provided data.
+DO NOT include "Prepared by", "Contact", organization, or author info.
+Keep mitigation strategies AND MITRE ATT&CK ANALYSIS as single-line entries.
+Add all tags from MISP data.
 
-  const systemPrompt = `You are a senior threat intelligence analyst. 
-Your task is to write a professional Threat Intelligence Report in the exact format and style provided.
-
-STRICT RULES:
-- Follow the section order exactly as given in the template.
-- Fill all [PLACEHOLDER] fields using ONLY the data provided — do NOT invent IOCs, CVEs, or threat actors.
-- Write in clear, professional English. Be specific and concise.
-- For sections with no data, write "No data available" — do not omit the section.
-- All STIX 2.1 fields must remain intact and unmodified.
-- Do NOT add markdown code blocks, backticks, or extra commentary outside the report.
-- Output only the report content — nothing else.`;
-
-  // ════════════════════════════════════════════════════
-  // USER PROMPT (REPORT TEMPLATE)
-  // ════════════════════════════════════════════════════
+`;
+  const mitreBlock = buildMitreBlock(mitreData);
+  const mitigationBlock = buildMitigationBlock(mitreData);
+  const whoisBlock = buildWHOISBlock(whoisData);
+  const historyBlock = buildHistoryBlock(history);
+  const peHeaderBlock = buildPEHeaderBlock(pe_header);
+  const isFile = type === "file" || type?.startsWith("hash"); // ← TAMBAH DI SINI
 
   const userPrompt = `
-# THREAT INTELLIGENCE REPORT
----
-**Date:** ${reportDate}
-**Source:** ${source}
-**Prepared by:** ${preparedBy}
-**TLP:** ${tlp}
-**Appendix:** ${appendix}
----
+THREAT INTELLIGENCE REPORT
+--------------------------------------------------
+Report ID : ${reportId}
+Date: ${now}
+Source: VirusTotal, AbuseIPDB, MISP, NVD, MITRE ATT&CK, RIPE WHOIS
+--------------------------------------------------
 
----
+EXECUTIVE SUMMARY
 
-## STIX 2.1 BUNDLE METADATA
+${correlationInsights}
 
-| Field        | Value                            |
-|--------------|----------------------------------|
-| type         | bundle                           |
-| id           | ${bundleId}                      |
-| spec_version | 2.1                              |
+--------------------------------------------------
 
-### SDO: report
+THREAT OVERVIEW
 
-| Field      | Value                                                         |
-|------------|---------------------------------------------------------------|
-| type       | report                                                        |
-| id         | ${reportId}                                                   |
-| created    | ${nowISO}                                                     |
-| name       | Threat Intelligence Report — ${type.toUpperCase()}: ${indicator} |
-| confidence | ${stixConfidence}/100                                         |
-| TLP        | ${tlp}                                                        |
-| object_refs| ${indicatorId}, ${relationshipId}                             |
+--- VirusTotal ---
 
----
+${vtOverviewBlock}
 
-## EXECUTIVE SUMMARY
+${
+  !isFile
+    ? `--- AbuseIPDB ---
 
-Write 2–3 paragraphs summarizing:
-- What this indicator is and why it is significant.
-- Key threat context based on detection rate (${detectionRate}% — ${malicious}/${totalVendors} vendors), abuse score (${abuseScore}%), MISP matches (${mispData?.matchCount ?? 0}), and CVE exposure (${cveMatches.length} CVEs linked).
-- Overall risk posture and urgency for the defending organization.
+${abuseOverviewBlock}`
+    : ""
+}
 
-[AI: GENERATE EXECUTIVE SUMMARY HERE BASED ON DATA ABOVE]
+--------------------------------------------------
 
----
-
-## THREAT OVERVIEW
-
-### Technical Details
-
-| Field              | Value                            |
-|--------------------|----------------------------------|
-| Indicator          | ${indicator}                     |
-| Type               | ${type.toUpperCase()}            |
-| STIX Pattern       | \`${stixPattern}\`               |
-| Detection Rate     | ${detectionRate}% (${malicious}/${totalVendors} vendors) |
-| VT Malicious       | ${malicious}                     |
-| VT Suspicious      | ${suspicious}                    |
-| VT Harmless        | ${harmless}                      |
-| VT Undetected      | ${undetected}                    |
-| Abuse Score        | ${abuseScore}% (${totalReports} reports) |
-| Confidence Score   | ${stixConfidence}/100            |
-| Threat Level       | ${threatLevel}                   |
-
-### SDO: indicator (STIX 2.1)
-
-| Field             | Value                                                          |
-|-------------------|----------------------------------------------------------------|
-| type              | indicator                                                      |
-| id                | ${indicatorId}                                                 |
-| created           | ${nowISO}                                                      |
-| pattern           | \`${stixPattern}\`                                             |
-| pattern_type      | stix                                                           |
-| valid_from        | ${nowISO}                                                      |
-| indicator_types   | malicious-activity                                             |
-| confidence        | ${stixConfidence}                                              |
-| labels            | ${tlp}                                                         |
-
----
-
-## CVE VULNERABILITY CORRELATION
+VULNERABILITY ANALYSIS
 
 ${cveBlock}
 
-[AI: Based on the CVE data above, write 2–3 sentences explaining the vulnerability exposure, exploitability risk, and recommended patching urgency.]
+--------------------------------------------------
 
----
-
-## THREAT INTELLIGENCE CORRELATION (MISP)
+THREAT INTELLIGENCE (MISP)
 
 ${mispBlock}
 
-${correlationInsights ? `\n### Correlation Analysis\n\n${correlationInsights}` : "[AI: Write 1–2 sentences summarizing MISP match significance and whether this indicator links to known campaigns.]"}
+${
+  !isFile
+    ? `
+--------------------------------------------------
 
----
+WHOIS INTELLIGENCE
 
-## THREAT ACTOR ATTRIBUTION
+${whoisBlock}
 
-[AI: Based on MISP threat actor field (${mispData?.threatActor ?? "Unknown"}) and tags (${(mispData?.tags ?? []).join(", ") || "none"}), describe the likely threat actor(s), their known TTPs, target sectors, and geographic focus. If no attribution data is available, state that attribution is unconfirmed and describe likely motivations inferred from the indicator type and detection context.]
+`
+    : ""
+}
 
----
+${
+  isFile
+    ? `
+--------------------------------------------------
 
-## INDICATORS OF COMPROMISE (IOCs)
+FILE HISTORY
 
-| Type       | Indicator                    | Confidence | Source              |
-|------------|------------------------------|------------|---------------------|
-| ${type.toUpperCase().padEnd(10)} | ${indicator.padEnd(28)} | ${stixConfidence}/100  | VirusTotal, AbuseIPDB |
+${historyBlock}
 
-[AI: If additional IOCs can be inferred from CVE or MISP data (related IPs, hashes, domains), list them here in the same table format. Otherwise state "No additional IOCs identified from available sources."]
+--------------------------------------------------
 
----
+PE HEADER ANALYSIS
 
-## IMPACT ANALYSIS
+${peHeaderBlock}
 
-[AI: Write 3–5 bullet points describing the potential impact if this indicator is active in an environment. Base this on: indicator type (${type}), threat level (${threatLevel}), CVE exploit status (${hasExploit ? "public exploit available" : "no public exploit"}), and MISP threat level (${mispData?.threatLevel ?? "unknown"}). Include business, operational, and compliance risks.]
+`
+    : ""
+}
 
----
+MITRE ATT&CK ANALYSIS
 
-## MITIGATION STRATEGIES
+${mitreBlock}
 
-[AI: Write 4–6 specific, actionable mitigation steps tailored to this indicator type (${type}) and threat level (${threatLevel}). Include: immediate containment, detection rules, patching guidance (if CVEs present), network controls, and logging/monitoring recommendations.]
+--------------------------------------------------
 
----
+THREAT ACTOR
 
-## STIX 2.1 RELATIONSHIP
+${mispData?.threatActor ?? "Unknown"}
 
-| Field             | Value                                                          |
-|-------------------|----------------------------------------------------------------|
-| type              | relationship                                                   |
-| id                | ${relationshipId}                                              |
-| created           | ${nowISO}                                                      |
-| relationship_type | indicates                                                      |
-| source_ref        | ${indicatorId}                                                 |
-| description       | [AI: One sentence describing what this indicator indicates]    |
+--------------------------------------------------
 
----
+INDICATORS OF COMPROMISE
 
-## CONCLUSION
+| Type | Indicator | Confidence |
+|------|----------|-----------|
+| ${type} | ${indicator} | ${confidence}/100 |
 
-[AI: Write 2–3 sentences summarizing the overall threat assessment, key actions required, and the confidence level of this report. End with a risk verdict: LOW / MEDIUM / HIGH and the recommended response priority.]
+--------------------------------------------------
 
----
+IMPACT ANALYSIS
 
-## REFERENCES
+Explain impact based on CVE severity and MITRE techniques.
 
-[AI: List any relevant public references that can be cited for the CVEs, threat actors, or indicator context mentioned in this report. Format as numbered list with source name and URL. If no specific references are available, list general authoritative sources for the indicator type (e.g., NVD for CVEs, AbuseIPDB for IP reputation).]
+--------------------------------------------------
 
----
-*Report generated: ${nowISO} | Confidence: ${stixConfidence}/100 |  ${tlp}*
+MITIGATION STRATEGIES
+
+${mitigationBlock}
+
+--------------------------------------------------
+
+COURSE OF ACTION
+
+- Block indicator
+- Monitor traffic
+- Patch vulnerabilities
+
+--------------------------------------------------
+
+CONCLUSION
+
+Summarize the threat.
+
+--------------------------------------------------
+
+REFERENCES
+
+- VirusTotal
+- AbuseIPDB
+- MISP
+- NVD
+- MITRE ATT&CK
 `;
 
   const completion = await client.chat.completions.create({
@@ -414,6 +460,8 @@ ${correlationInsights ? `\n### Correlation Analysis\n\n${correlationInsights}` :
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
     ],
+    temperature: 0.3,
+    max_tokens: 2500, // ← TAMBAH INI
   });
 
   const raw = completion.choices?.[0]?.message?.content || "No response";

@@ -1,13 +1,7 @@
 function extractCVEsFromText(text: string): string[] {
   const matches = text.match(/CVE[-_]\d{4}[-_]\d{4,7}/gi) ?? [];
 
-  return [
-    ...new Set(
-      matches.map((c) =>
-        c.replace(/_/g, "-").toUpperCase()
-      )
-    ),
-  ];
+  return [...new Set(matches.map((c) => c.replace(/_/g, "-").toUpperCase()))];
 }
 
 export async function fetchVirusTotal(indicator: string, type: string) {
@@ -141,8 +135,49 @@ export async function fetchVirusTotal(indicator: string, type: string) {
       };
     }
   }
+  // ── BARU: history + PE header (khusus file hash) ──────────────
+  const history = isFileHash
+    ? {
+        creation_time: attr.creation_date
+          ? new Date(attr.creation_date * 1000).toISOString()
+          : null,
+        first_seen_itw: attr.first_seen_itw_date
+          ? new Date(attr.first_seen_itw_date * 1000).toISOString()
+          : null,
+        first_submission: attr.first_submission_date
+          ? new Date(attr.first_submission_date * 1000).toISOString()
+          : null,
+        last_submission: attr.last_submission_date
+          ? new Date(attr.last_submission_date * 1000).toISOString()
+          : null,
+        last_analysis: attr.last_analysis_date
+          ? new Date(attr.last_analysis_date * 1000).toISOString()
+          : null,
+      }
+    : null;
+  const PE_MACHINE_TYPES: Record<number, string> = {
+    0x14c: "Intel 386",
+    0x8664: "x64 (AMD64)",
+    0xaa64: "ARM64",
+    0x1c0: "ARM",
+    0x200: "Intel Itanium",
+  };
 
-    // ── BARU: crowdsourced YARA rules (INI YANG DARI SCREENSHOT) ──
+  const pe_header = isFileHash
+    ? {
+        target_machine:
+          PE_MACHINE_TYPES[attr.pe_info?.machine_type] ??
+          attr.pe_info?.machine_type ??
+          null,
+        compilation_timestamp: attr.creation_date
+          ? new Date(attr.creation_date * 1000).toISOString()
+          : null,
+        entry_point: attr.pe_info?.entry_point ?? null,
+        contained_sections: attr.pe_info?.sections?.length ?? null,
+      }
+    : null;
+
+  // ── BARU: crowdsourced YARA rules (INI YANG DARI SCREENSHOT) ──
   const yaraResults = attr.crowdsourced_yara_results ?? [];
 
   let yaraTextBlob = "";
@@ -196,7 +231,10 @@ export async function fetchVirusTotal(indicator: string, type: string) {
   // ── BARU: crowdsourced_context khusus IP/domain ──
   // Field ini berbeda dari crowdsourced_ids_results, khusus ada di IP & domain
   const crowdsourcedContextRaw = attr.crowdsourced_context ?? [];
-  console.log("RAW crowdsourced_context:", JSON.stringify(crowdsourcedContextRaw, null, 2));
+  console.log(
+    "RAW crowdsourced_context:",
+    JSON.stringify(crowdsourcedContextRaw, null, 2),
+  );
   const crowdsourcedContextItems = crowdsourcedContextRaw.map((ctx: any) => {
     const detailText =
       ctx.detail ??
@@ -206,26 +244,17 @@ export async function fetchVirusTotal(indicator: string, type: string) {
       ctx.text ??
       "";
 
-    const titleText =
-      ctx.title ??
-      ctx.heading ??
-      "Untitled";
+    const titleText = ctx.title ?? ctx.heading ?? "Untitled";
 
-    const sourceText =
-      ctx.source ??
-      ctx.source_name ??
-      ctx.vendor ??
-      null;
+    const sourceText = ctx.source ?? ctx.source_name ?? ctx.vendor ?? null;
 
     const severityText =
-      ctx.severity ??
-      ctx.alert_severity ??
-      ctx.level ??
-      "LOW";
+      ctx.severity ?? ctx.alert_severity ?? ctx.level ?? "LOW";
     const textBlob = [ctx.detail, ctx.title, ctx.message]
       .filter(Boolean)
       .join(" ");
-    const cveMatches = textBlob.match(/CVE-\d{4}-\d{4,7}/gi) ?? [];    
+    
+    const cveMatches = textBlob.match(/CVE-\d{4}-\d{4,7}/gi) ?? [];
 
     return {
       title: titleText,
@@ -244,17 +273,15 @@ export async function fetchVirusTotal(indicator: string, type: string) {
     ...crowdsourcedContextItems.flatMap((c: any) => c.cve ?? []),
   ].map((c) => c.toUpperCase());
 
-const cveExtracted = [
-  ...new Set(
-    [
-      ...tags.filter((t: string) => /^CVE[-_]\d{4}[-_]\d{4,7}$/i.test(t)),
-      ...allCveFromContext,
-      ...yaraCVEs, // 🔥 TAMBAHAN DARI YARA
-    ].map((c) =>
-      c.replace(/_/g, "-").toUpperCase()
+  const cveExtracted = [
+    ...new Set(
+      [
+        ...tags.filter((t: string) => /^CVE[-_]\d{4}[-_]\d{4,7}$/i.test(t)),
+        ...allCveFromContext,
+        ...yaraCVEs, // 🔥 TAMBAHAN DARI YARA
+      ].map((c) => c.replace(/_/g, "-").toUpperCase()),
     ),
-  ),
-];
+  ];
 
   return {
     indicator,
@@ -267,6 +294,8 @@ const cveExtracted = [
       meaningful_name: meaningfulName,
       type_description: typeDescription,
       file_size: fileSize,
+      history, // ← TAMBAH
+      pe_header, // ← TAMBAH
 
       detection_summary: {
         malicious: stats.malicious,

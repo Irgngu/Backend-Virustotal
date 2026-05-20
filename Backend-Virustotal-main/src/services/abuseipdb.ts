@@ -79,6 +79,7 @@ function formatAbuseIPDB(api: any) {
 
   return {
     ip: api.ipAddress || null,
+    ip_version: api.ipVersion ?? null, // ← TAMBAH DI SINI
     abuse_confidence_score: api.abuseConfidenceScore || 0,
     total_reports: api.totalReports || 0,
     country_code: api.countryCode || null,
@@ -97,7 +98,7 @@ function formatAbuseIPDB(api: any) {
       name: CATEGORY_MAP[id] || "Unknown",
     })),
 
-    recent_reports: sortedReports.slice(0, 3).map((r: any) => ({
+    recent_reports: sortedReports.slice(0, 5).map((r: any) => ({
       reported_at: r.reportedAt,
       comment: r.comment,
       categories: r.categories,
