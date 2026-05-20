@@ -1,7 +1,7 @@
 // src/server.ts
 
 import dotenv from "dotenv";
-dotenv.config({ override: true });
+dotenv.config();
 
 import { Hono } from "hono";
 import { serve } from "@hono/node-server";
@@ -13,19 +13,22 @@ import type { Server } from "http";
    SERVICES
 ============================== */
 import { fetchVirusTotal } from "./services/virustotal.js";
-import { getAbuseIPDB, getLocationFallback, CATEGORY_MAP } from "./services/abuseipdb.js";
+import {
+  getAbuseIPDB,
+  getLocationFallback,
+  CATEGORY_MAP,
+} from "./services/abuseipdb.js";
 import { generateReportAI } from "./services/qwen3.js";
 import { searchMISP } from "./services/misp.js";
-import {
-  analyzeThreatToMitigation,
-} from "./services/mitigation.js";
+import { analyzeThreatToMitigation } from "./services/mitigation.js";
 import {
   matchCVE,
   calculateCVERiskScore,
   type CVEMatchResult,
   type CVERiskScore,
 } from "./services/cve.js";
-import { fetchWHOIS } from "./services/whois.js";
+import { fetchWHOIS, parseDomainWHOIS } from "./services/whois.js";
+import { generateOpenCTISTIX21 } from "./services/stix.js";
 /* ===============================
    CORE
 ============================== */
@@ -139,10 +142,21 @@ app.post("/chat", async (c) => {
        VIRUSTOTAL
     ============================== */
     const vt = await fetchVirusTotal(indicator, type);
-    // ── WHOIS (hanya untuk IP) ──
+    // ── WHOIS ─────────────────────────────
     let whoisData = null;
+
+    // IP → RIPE WHOIS
     if (type === "ip") {
       whoisData = await fetchWHOIS(indicator);
+    }
+
+    // DOMAIN → VirusTotal WHOIS
+    if (type === "domain") {
+      const rawWhois = (vt?.virustotal as any)?.whois;
+
+      if (rawWhois) {
+        whoisData = parseDomainWHOIS(rawWhois);
+      }
     }
 
     /* ===============================
@@ -235,185 +249,172 @@ app.post("/chat", async (c) => {
     const mergedTags = [...(mispData?.tags ?? []), ...vtTags];
     const uniqueTags = [...new Set(mergedTags)];
 
+    // ── ABUSEIPDB TAGS ─────────────────────────────
+    const abuseTags: string[] = [];
+
+    if (abuseipdb?.recent_reports) {
+      abuseipdb.recent_reports.forEach((report: any) => {
+        if (Array.isArray(report.categories)) {
+          report.categories.forEach((id: number) => {
+            const category = CATEGORY_MAP[id];
+
+            if (category) {
+              abuseTags.push(
+                String(category).toLowerCase().replace(/\s+/g, "-"),
+              );
+            }
+          });
+        }
+      });
+    }
+
+    // ── MISP TAGS ─────────────────────────────
+    const mispTags: string[] = Array.isArray(mispData?.tags)
+      ? mispData.tags.map((t: string) =>
+          String(t)
+            .toLowerCase()
+            .trim()
+            .replace(/[_\s]+/g, "-"),
+        )
+      : [];
+
     function normalizeTags(tags: string[] = []): string[] {
-      return [...new Set(
-        tags
-          .map((t) =>
-            String(t)
-              .toLowerCase()
-              .trim()
-              .replace(/[_\s]+/g, "-")
-          )
-          .filter(Boolean)
-      )];
+      return [
+        ...new Set(
+          tags
+            .map((t) =>
+              String(t)
+                .toLowerCase()
+                .trim()
+                .replace(/[_\s]+/g, "-"),
+            )
+            .filter(Boolean),
+        ),
+      ];
     }
-    
+
+    // ── FINAL TAG GROUPING ─────────────────────────────
+    const finalVirusTotalTags = normalizeTags(vtTags);
+
+    const finalAbuseIPDBTags = normalizeTags(abuseTags);
+
+    const finalMISPTags = normalizeTags(mispTags);
+
+    const allCombinedTags = normalizeTags([
+      ...finalVirusTotalTags,
+      ...finalAbuseIPDBTags,
+      ...finalMISPTags,
+    ]);
+
     function extractVendorTags(result: string): string[] {
-    const text = result.toLowerCase();
+      const text = result.toLowerCase();
 
-    const patterns: Record<string, RegExp[]> = {
-      trojan: [
-        /\btrojan\b/,
-        /\btroj\b/,
-        /\btrj\b/,
-        /\btr\./,
-      ],
+      const patterns: Record<string, RegExp[]> = {
+        trojan: [/\btrojan\b/, /\btroj\b/, /\btrj\b/, /\btr\./],
 
-      ransomware: [
-        /\bransom\b/,
-        /\bcrypt\b/,
-        /\blocker\b/,
-        /\bwannacry\b/,
-        /\blocky\b/,
-        /\bcerber\b/,
-      ],
+        ransomware: [
+          /\bransom\b/,
+          /\bcrypt\b/,
+          /\blocker\b/,
+          /\bwannacry\b/,
+          /\blocky\b/,
+          /\bcerber\b/,
+        ],
 
-      backdoor: [
-        /\bbackdoor\b/,
-        /\bback\./,
-        /\bbckdr\b/,
-        /\bbdoor\b/,
-      ],
+        backdoor: [/\bbackdoor\b/, /\bback\./, /\bbckdr\b/, /\bbdoor\b/],
 
-      downloader: [
-        /\bdownloader\b/,
-        /\bdownload\b/,
-        /\bdwnldr\b/,
-        /\bdldr\b/,
-      ],
+        downloader: [
+          /\bdownloader\b/,
+          /\bdownload\b/,
+          /\bdwnldr\b/,
+          /\bdldr\b/,
+        ],
 
-      dropper: [
-        /\bdropper\b/,
-        /\bdrop\b/,
-        /\bdrp\b/,
-      ],
+        dropper: [/\bdropper\b/, /\bdrop\b/, /\bdrp\b/],
 
-      spyware: [
-        /\bspyware\b/,
-        /\bspy\b/,
-        /\bkeylog\b/,
-        /\blogger\b/,
-      ],
+        spyware: [/\bspyware\b/, /\bspy\b/, /\bkeylog\b/, /\blogger\b/],
 
-      adware: [
-        /\badware\b/,
-        /\badload\b/,
-        /\badvert\b/,
-        /\badbrowser\b/,
-      ],
+        adware: [/\badware\b/, /\badload\b/, /\badvert\b/, /\badbrowser\b/],
 
-      worm: [
-        /\bworm\b/,
-        /\bwrm\b/,
-        /\bautorun\b/,
-      ],
+        worm: [/\bworm\b/, /\bwrm\b/, /\bautorun\b/],
 
-      cryptominer: [
-        /\bminer\b/,
-        /\bcoinminer\b/,
-        /\bbitcoin\b/,
-        /\bcrypto\b/,
-        /\bxmrig\b/,
-        /\bcoinhive\b/,
-      ],
+        cryptominer: [
+          /\bminer\b/,
+          /\bcoinminer\b/,
+          /\bbitcoin\b/,
+          /\bcrypto\b/,
+          /\bxmrig\b/,
+          /\bcoinhive\b/,
+        ],
 
-      stealer: [
-        /\bstealer\b/,
-        /\bsteal\b/,
-        /\binfo\b/,
-        /\bpwstealer\b/,
-        /\bpws\b/,
-      ],
+        stealer: [
+          /\bstealer\b/,
+          /\bsteal\b/,
+          /\binfo\b/,
+          /\bpwstealer\b/,
+          /\bpws\b/,
+        ],
 
-      banker: [
-        /\bbanker\b/,
-        /\bbank\b/,
-        /\bzbot\b/,
-        /\bzeus\b/,
-        /\bdridex\b/,
-        /\bemotet\b/,
-      ],
+        banker: [
+          /\bbanker\b/,
+          /\bbank\b/,
+          /\bzbot\b/,
+          /\bzeus\b/,
+          /\bdridex\b/,
+          /\bemotet\b/,
+        ],
 
-      rat: [
-        /\brat\b/,
-        /\bremoteadmin\b/,
-        /\bnjrat\b/,
-        /\bdarkcomet\b/,
-        /\bnanocore\b/,
-        /\bremote[-_\s]?access[-_\s]?trojan\b/,
-      ],
+        rat: [
+          /\brat\b/,
+          /\bremoteadmin\b/,
+          /\bnjrat\b/,
+          /\bdarkcomet\b/,
+          /\bnanocore\b/,
+          /\bremote[-_\s]?access[-_\s]?trojan\b/,
+        ],
 
-      rootkit: [
-        /\brootkit\b/,
-        /\broot\b/,
-        /\bbootkit\b/,
-      ],
+        rootkit: [/\brootkit\b/, /\broot\b/, /\bbootkit\b/],
 
-      exploit: [
-        /\bexploit\b/,
-        /\bexp\b/,
-        /\bcve-/,
-        /\bshellcode\b/,
-      ],
+        exploit: [/\bexploit\b/, /\bexp\b/, /\bcve-/, /\bshellcode\b/],
 
-      pua: [
-        /\bpua\b/,
-        /\bunwanted\b/,
-        /\bpotentially\b/,
-        /\bpup\b/,
-        /\briskware\b/,
-        /\bhacktool\b/,
-      ],
+        pua: [
+          /\bpua\b/,
+          /\bunwanted\b/,
+          /\bpotentially\b/,
+          /\bpup\b/,
+          /\briskware\b/,
+          /\bhacktool\b/,
+        ],
 
-      phishing: [
-        /\bphish/,
-      ],
+        phishing: [/\bphish/],
 
-      botnet: [
-        /\bbotnet\b/,
-      ],
+        botnet: [/\bbotnet\b/],
 
-      c2: [
-        /\bc2\b/,
-        /command[-_\s]?and[-_\s]?control/,
-      ],
+        c2: [/\bc2\b/, /command[-_\s]?and[-_\s]?control/],
 
-      malware: [
-        /\bmalware\b/,
-      ],
+        malware: [/\bmalware\b/],
 
-      loader: [
-        /\bloader\b/,
-      ],
+        loader: [/\bloader\b/],
 
-      keylogger: [
-        /\bkeylogger\b/,
-      ],
-    };
+        keylogger: [/\bkeylogger\b/],
+      };
 
-    const found: string[] = [];
+      const found: string[] = [];
 
-    for (const [tag, regexes] of Object.entries(patterns)) {
-      if (regexes.some((r) => r.test(text))) {
-        found.push(tag);
+      for (const [tag, regexes] of Object.entries(patterns)) {
+        if (regexes.some((r) => r.test(text))) {
+          found.push(tag);
+        }
       }
-    }
 
-    return found;
-  }
+      return found;
+    }
     /* ──────────────────────────────
        8. NORMALIZE → MITIGATION ENGINE
     ────────────────────────────── */
     const normalized = {
       type,
-      tags: normalizeTags([
-        ...uniqueTags,
-        ...(abuseipdb?.recent_reports?.flatMap((r: any) =>
-          (r.categories ?? [])
-            .map((id: number) => CATEGORY_MAP[id])
-            .filter(Boolean)
-        ) ?? []),
-      ]),
+      tags: allCombinedTags,
     };
 
     const threatIntel = await analyzeThreatToMitigation(normalized);
@@ -427,6 +428,16 @@ app.post("/chat", async (c) => {
       ),
     ];
     const mitreName = threatIntel.primaryTechniqueName;
+
+    // /* ──────────────────────────────
+    //    9. EXPLAINABILITY
+    // ────────────────────────────── */
+    // const reasoning = [
+    //   `VT detections: ${malicious}/${totalVendors}`,
+    //   `Abuse score: ${abuseScore}%`,
+    //   `MISP threat level: ${mispData?.threatLevel || "Low"}`,
+    //   `CVE matches: ${cveMatches.length} (risk score: ${cveRiskScore.score}/100)`,
+    // ].join("\n");
 
     /* ──────────────────────────────
        10. CORRELATION ENGINE
@@ -497,6 +508,7 @@ app.post("/chat", async (c) => {
       vtData: vt,
       abuseipdb,
       mispData,
+      // reasoning,
       cve: threatIntel.cve,
       cwe: threatIntel.cwe,
       mitreMitigations: threatIntel.mitigations,
@@ -510,8 +522,13 @@ app.post("/chat", async (c) => {
       whoisData,
       history: vt.virustotal?.history ?? null, // ← TAMBAH
       pe_header: vt.virustotal?.pe_header ?? null, // ← TAMBAH
+      tags: {
+        virustotal: finalVirusTotalTags,
+        abuseipdb: finalAbuseIPDBTags,
+        misp: finalMISPTags,
+        combined: allCombinedTags,
+      },
     });
-
   } catch (err) {
     console.error(err);
     return c.json({ error: "Failed to generate report" }, 500);
@@ -628,6 +645,32 @@ app.post("/check-ip", async (c) => {
     return c.json(
       {
         error: "Failed to check IP reputation",
+      },
+      500,
+    );
+  }
+});
+
+/* ===============================
+   EXPORT STIX 2.1 JSON
+============================== */
+app.post("/export/stix", async (c) => {
+  try {
+    const body = await c.req.json();
+
+    const stixBundle = generateOpenCTISTIX21(body);
+
+    return c.json(stixBundle, 200, {
+      "Content-Type": "application/json",
+      "Content-Disposition": `attachment; filename="opencti-stix-${body.reportId || "report"}.json"`,
+    });
+  } catch (error: any) {
+    console.error("[STIX EXPORT ERROR]", error);
+
+    return c.json(
+      {
+        error: "Failed to export STIX 2.1 JSON",
+        details: error.message,
       },
       500,
     );

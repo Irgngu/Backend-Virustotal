@@ -289,6 +289,7 @@ export async function fetchVirusTotal(indicator: string, type: string) {
     threatLevel,
     stats,
     total,
+    whois: attr.whois ?? null,
     virustotal: {
       indicator,
       meaningful_name: meaningfulName,

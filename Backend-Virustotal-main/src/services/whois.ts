@@ -1,6 +1,7 @@
 // src/services/whois.ts
-// Fetch WHOIS data dari RIPE REST API
-// Elemen: Timestamps, IP Address, CTI Source, Author
+// WHOIS Service
+// - IP WHOIS     : RIPE REST API
+// - Domain WHOIS : Parser raw WHOIS dari VirusTotal
 
 export interface WHOISTimestamps {
   inetnum_created: string | null;
@@ -39,7 +40,20 @@ export interface WHOISResult {
   author: WHOISAuthor;
 }
 
-// ── Helper: ambil value dari array attributes RIPE ──────────────
+// DOMAIN WHOIS khusus VirusTotal/raw WHOIS
+export interface DomainWHOISResult {
+  timestamps: {
+    registered: string | null;
+    last_modified: string | null;
+    expiry: string | null;
+  };
+  author: {
+    org_name: string | null;
+    country: string | null;
+  };
+}
+
+// ── Helper RIPE ───────────────────────────────────────────────
 function getAttr(attributes: any[], key: string): string | null {
   const found = attributes.find((a: any) => a.name === key);
   return found?.value ?? null;
@@ -49,7 +63,29 @@ function getAllAttr(attributes: any[], key: string): string[] {
   return attributes.filter((a: any) => a.name === key).map((a: any) => a.value);
 }
 
-// ── Main fetch ───────────────────────────────────────────────────
+// ── Helper Domain WHOIS ───────────────────────────────────────
+function extractField(raw: string, field: string): string | null {
+  const regex = new RegExp(`${field}:\\s*(.+)`, "i");
+  const match = raw.match(regex);
+  return match?.[1]?.trim() ?? null;
+}
+
+// Untuk input DOMAIN dari raw WHOIS VirusTotal
+export function parseDomainWHOIS(rawWhois: string): DomainWHOISResult {
+  return {
+    timestamps: {
+      registered: extractField(rawWhois, "Create date"),
+      last_modified: extractField(rawWhois, "Update date"),
+      expiry: extractField(rawWhois, "Expiry date"),
+    },
+    author: {
+      org_name: extractField(rawWhois, "Registrant company"),
+      country: extractField(rawWhois, "Registrant country"),
+    },
+  };
+}
+
+// ── Main fetch IP WHOIS dari RIPE ──────────────────────────────
 export async function fetchWHOIS(ip: string): Promise<WHOISResult | null> {
   try {
     const url = `https://rest.db.ripe.net/search.json?query-string=${ip}&type-filter=inetnum&flags=no-filtering`;
@@ -66,11 +102,9 @@ export async function fetchWHOIS(ip: string): Promise<WHOISResult | null> {
     const json = await res.json();
     const objects: any[] = json?.objects?.object ?? [];
 
-    // ── Ambil blok inetnum ───────────────────────────────────────
     const inetnumObj = objects.find((o: any) => o.type === "inetnum");
     const inetnumAttrs: any[] = inetnumObj?.attributes?.attribute ?? [];
 
-    // ── Ambil blok organisation (lewat org reference) ────────────
     const orgId = getAttr(inetnumAttrs, "org");
     let orgAttrs: any[] = [];
 
@@ -79,26 +113,28 @@ export async function fetchWHOIS(ip: string): Promise<WHOISResult | null> {
         `https://rest.db.ripe.net/ripe/organisation/${orgId}.json`,
         { headers: { Accept: "application/json" } },
       );
+
       if (orgRes.ok) {
         const orgJson = await orgRes.json();
         orgAttrs = orgJson?.objects?.object?.[0]?.attributes?.attribute ?? [];
       }
     }
 
-    // ── Ambil blok route ─────────────────────────────────────────
     const routeRes = await fetch(
       `https://rest.db.ripe.net/search.json?query-string=${ip}&type-filter=route&flags=no-filtering`,
       { headers: { Accept: "application/json" } },
     );
+
     let routeAttrs: any[] = [];
+
     if (routeRes.ok) {
       const routeJson = await routeRes.json();
       const routeObj = routeJson?.objects?.object?.[0];
       routeAttrs = routeObj?.attributes?.attribute ?? [];
     }
 
-    // ── Parse inetnum range ──────────────────────────────────────
-    const inetnumRaw = getAttr(inetnumAttrs, "inetnum"); // "45.155.204.0 - 45.155.205.255"
+    const inetnumRaw = getAttr(inetnumAttrs, "inetnum");
+
     let rangeStart: string | null = null;
     let rangeEnd: string | null = null;
 
@@ -108,9 +144,8 @@ export async function fetchWHOIS(ip: string): Promise<WHOISResult | null> {
       rangeEnd = parts[1]?.trim() ?? null;
     }
 
-    const cidr = getAttr(routeAttrs, "route"); // "45.155.204.0/23"
+    const cidr = getAttr(routeAttrs, "route");
 
-    // ── Timestamps ───────────────────────────────────────────────
     const timestamps: WHOISTimestamps = {
       inetnum_created: getAttr(inetnumAttrs, "created"),
       inetnum_last_modified: getAttr(inetnumAttrs, "last-modified"),
@@ -120,21 +155,19 @@ export async function fetchWHOIS(ip: string): Promise<WHOISResult | null> {
       route_last_modified: getAttr(routeAttrs, "last-modified"),
     };
 
-    // ── IP Address ───────────────────────────────────────────────
     const ip_address: WHOISIPAddress = {
       range_start: rangeStart,
       range_end: rangeEnd,
-      cidr: cidr,
+      cidr,
     };
 
-    // ── CTI Source ───────────────────────────────────────────────
     const sourceRaw = getAttr(inetnumAttrs, "source") ?? "RIPE";
+
     const cti_source: WHOISCTISource = {
       source: sourceRaw.replace("# Filtered", "").trim(),
       filtered: sourceRaw.includes("# Filtered"),
     };
 
-    // ── Author ───────────────────────────────────────────────────
     const orgName =
       getAttr(orgAttrs, "org-name") ?? getAttr(inetnumAttrs, "org") ?? null;
 
@@ -151,7 +184,12 @@ export async function fetchWHOIS(ip: string): Promise<WHOISResult | null> {
       country: getAttr(inetnumAttrs, "country"),
     };
 
-    return { timestamps, ip_address, cti_source, author };
+    return {
+      timestamps,
+      ip_address,
+      cti_source,
+      author,
+    };
   } catch (err) {
     console.error("[WHOIS] fetch error:", err);
     return null;

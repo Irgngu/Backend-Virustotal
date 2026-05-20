@@ -84,13 +84,15 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
     tactic: "Reconnaissance",
     score: (n) => {
       let s = 0;
-      if (hasTag(n, ["scanner", "scanning", "masscan", "shodan", "censys"])) s += 50;
+      if (hasTag(n, ["scanner", "scanning", "masscan", "shodan", "censys"]))
+        s += 50;
       if (hasTagPartial(n, ["scan", "probe", "sweep"])) s += 20;
       return s;
     },
     reasons: (n) => {
       const r: string[] = [];
-      if (hasTagPartial(n, ["scan", "probe"])) r.push("IOC tagged as active scanning activity");
+      if (hasTagPartial(n, ["scan", "probe"]))
+        r.push("IOC tagged as active scanning activity");
       return r;
     },
     mitigations: [
@@ -131,7 +133,15 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
     tactic: "Reconnaissance",
     score: (n) => {
       let s = 0;
-      if (hasTag(n, ["phishing", "spearphishing", "social-engineering", "brand-impersonation"])) s += 60;
+      if (
+        hasTag(n, [
+          "phishing",
+          "spearphishing",
+          "social-engineering",
+          "brand-impersonation",
+        ])
+      )
+        s += 60;
       if (hasTagPartial(n, ["phish"])) s += 40;
       return s;
     },
@@ -669,7 +679,9 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
       const r: string[] = [];
 
       if (hasTagPartial(n, ["access", "broker", "rdp"])) {
-        r.push("IOC associated with acquired unauthorized access infrastructure");
+        r.push(
+          "IOC associated with acquired unauthorized access infrastructure",
+        );
       }
 
       return r;
@@ -912,13 +924,24 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
     tactic: "Initial Access",
     score: (n) => {
       let s = 0;
-      if (hasTag(n, ["rdp", "ssh", "vpn", "citrix", "remote-access", "remote-desktop"])) s += 60;
+      if (
+        hasTag(n, [
+          "rdp",
+          "ssh",
+          "vpn",
+          "citrix",
+          "remote-access",
+          "remote-desktop",
+        ])
+      )
+        s += 60;
       if (hasTagPartial(n, ["brute", "credential"])) s += 20;
       return s;
     },
     reasons: (n) => {
       const r: string[] = [];
-      if (hasTagPartial(n, ["rdp", "ssh", "vpn"])) r.push("IOC associated with remote service exploitation");
+      if (hasTagPartial(n, ["rdp", "ssh", "vpn"]))
+        r.push("IOC associated with remote service exploitation");
       return r;
     },
     mitigations: [
@@ -960,12 +983,14 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
     tactic: "Initial Access",
     score: (n) => {
       let s = 0;
-      if (hasTag(n, ["phishing", "credential-phishing", "spearphishing"])) s += 55;
+      if (hasTag(n, ["phishing", "credential-phishing", "spearphishing"]))
+        s += 55;
       return s;
     },
     reasons: (n) => {
       const r: string[] = [];
-      if (hasTagPartial(n, ["phish"])) r.push("IOC tagged as phishing delivery infrastructure");
+      if (hasTagPartial(n, ["phish"]))
+        r.push("IOC tagged as phishing delivery infrastructure");
       return r;
     },
     mitigations: [
@@ -1115,13 +1140,16 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
     tactic: "Initial Access",
     score: (n) => {
       let s = 0;
-      if (hasTag(n, ["valid-accounts", "stolen-creds", "credential-access"])) s += 55;
-      if (hasTagPartial(n, ["credential", "password", "token", "stolen"])) s += 20;
+      if (hasTag(n, ["valid-accounts", "stolen-creds", "credential-access"]))
+        s += 55;
+      if (hasTagPartial(n, ["credential", "password", "token", "stolen"]))
+        s += 20;
       return s;
     },
     reasons: (n) => {
       const r: string[] = [];
-      if (hasTagPartial(n, ["credential", "stolen"])) r.push("IOC associated with stolen/abused valid credentials");
+      if (hasTagPartial(n, ["credential", "stolen"]))
+        r.push("IOC associated with stolen/abused valid credentials");
       return r;
     },
     mitigations: [
@@ -1237,17 +1265,9 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
     score: (n) => {
       let s = 0;
 
-      if (
-        hasTag(n, [
-        "web-app-attack",
-        "sql-injection",
-        "exploit",
-        ])
-      )
-        s += 60;
+      if (hasTag(n, ["web-app-attack", "sql-injection", "exploit"])) s += 60;
 
-      if (hasTagPartial(n, ["exploit", "injection", "shell"]))
-        s += 30;
+      if (hasTagPartial(n, ["exploit", "injection", "shell"])) s += 30;
 
       return s;
     },
@@ -1633,7 +1653,8 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
     },
     reasons: (n) => {
       const r: string[] = [];
-      if (hasTagPartial(n, ["trojan", "dropper", "malware"])) r.push("Tags indicate user-executed malware delivery");
+      if (hasTagPartial(n, ["trojan", "dropper", "malware"]))
+        r.push("Tags indicate user-executed malware delivery");
       return r;
     },
     mitigations: [
@@ -2829,7 +2850,10 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
     tactic: "Persistence",
     score: (n) => {
       let s = 0;
-      if (hasTag(n, ["account-manipulation", "backdoor-account", "persistence"])) s += 60;
+      if (
+        hasTag(n, ["account-manipulation", "backdoor-account", "persistence"])
+      )
+        s += 60;
       return s;
     },
     reasons: (n) => {
@@ -5691,13 +5715,15 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
     tactic: "Credential Access",
     score: (n) => {
       let s = 0;
-      if (hasTag(n, ["brute-force", "password-spray", "credential-stuffing"])) s += 55;
+      if (hasTag(n, ["brute-force", "password-spray", "credential-stuffing"]))
+        s += 55;
       if (hasTagPartial(n, ["brute", "spray", "stuff"])) s += 20;
       return s;
     },
     reasons: (n) => {
       const r: string[] = [];
-      if (hasTagPartial(n, ["brute", "spray", "stuff"])) r.push("IOC tagged as brute-force/credential attack source");
+      if (hasTagPartial(n, ["brute", "spray", "stuff"]))
+        r.push("IOC tagged as brute-force/credential attack source");
       return r;
     },
     mitigations: [
@@ -6673,7 +6699,8 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
     tactic: "Discovery",
     score: (n) => {
       let s = 0;
-      if (hasTag(n, ["port-scan", "network-scan", "service-discovery"])) s += 60;
+      if (hasTag(n, ["port-scan", "network-scan", "service-discovery"]))
+        s += 60;
       return s;
     },
     reasons: (n) => {
@@ -7610,13 +7637,25 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
     tactic: "Lateral Movement",
     score: (n) => {
       let s = 0;
-      if (hasTag(n, ["remote-exploit", "smb-exploit", "rdp-exploit", "eternalblue", "remote-service-exploit"])) s += 70;
+      if (
+        hasTag(n, [
+          "remote-exploit",
+          "smb-exploit",
+          "rdp-exploit",
+          "eternalblue",
+          "remote-service-exploit",
+        ])
+      )
+        s += 70;
       if (hasTagPartial(n, ["exploit", "remote", "lateral"])) s += 20;
       return s;
     },
     reasons: (n) => {
       const r: string[] = [];
-      if (hasTagPartial(n, ["eternalblue", "remote-exploit"])) r.push("IOC associated with exploitation of remote services for lateral movement");
+      if (hasTagPartial(n, ["eternalblue", "remote-exploit"]))
+        r.push(
+          "IOC associated with exploitation of remote services for lateral movement",
+        );
       return r;
     },
     mitigations: [
@@ -8620,12 +8659,14 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
     tactic: "Command and Control",
     score: (n) => {
       let s = 0;
-      if (hasTag(n, ["c2", "command-and-control", "trojan", "botnet", "rat"])) s += 50;
+      if (hasTag(n, ["c2", "command-and-control", "trojan", "botnet", "rat"]))
+        s += 50;
       return s;
     },
     reasons: (n) => {
       const r: string[] = [];
-      if (hasTagPartial(n, ["c2", "botnet", "rat"])) r.push("Tags indicate C2/botnet communication channel");
+      if (hasTagPartial(n, ["c2", "botnet", "rat"]))
+        r.push("Tags indicate C2/botnet communication channel");
       return r;
     },
     mitigations: [
@@ -9170,13 +9211,24 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
     tactic: "Impact",
     score: (n) => {
       let s = 0;
-      if (hasTag(n, ["ddos", "dos", "flood", "amplification", "reflection", "botnet-ddos"])) s += 70;
+      if (
+        hasTag(n, [
+          "ddos",
+          "dos",
+          "flood",
+          "amplification",
+          "reflection",
+          "botnet-ddos",
+        ])
+      )
+        s += 70;
       if (hasTagPartial(n, ["ddos", "flood"])) s += 20;
       return s;
     },
     reasons: (n) => {
       const r: string[] = [];
-      if (hasTagPartial(n, ["ddos", "flood", "amplification"])) r.push("IOC tagged as DDoS attack source or amplification node");
+      if (hasTagPartial(n, ["ddos", "flood", "amplification"]))
+        r.push("IOC tagged as DDoS attack source or amplification node");
       return r;
     },
     mitigations: [
@@ -9414,7 +9466,10 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
     tactic: "Impact",
     score: (n) => {
       let s = 0;
-      if (hasTag(n, ["endpoint-dos", "application-crash", "resource-exhaustion"])) s += 70;
+      if (
+        hasTag(n, ["endpoint-dos", "application-crash", "resource-exhaustion"])
+      )
+        s += 70;
       return s;
     },
     reasons: (n) => {

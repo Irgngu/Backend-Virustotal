@@ -39,8 +39,26 @@ type WeightProfile = {
 
 function resolveWeights(type: string, mispMatchCount: number): WeightProfile {
   const t = type.toLowerCase();
+  const hasMISP = mispMatchCount > 0;
 
-  // Hash or unknown domain → VT 100%
+  // Hash dengan data MISP → VT 65%, MISP 35%
+  if (
+    hasMISP &&
+    (t === "hash" ||
+      t === "hash-md5" ||
+      t === "hash-sha1" ||
+      t === "hash-sha256" ||
+      t.includes("hash"))
+  ) {
+    return {
+      vt: 0.65,
+      abuse: 0.0,
+      misp: 0.35,
+      label: "Hash (MISP Correlated)",
+    };
+  }
+
+  // Hash tanpa data MISP → VT 100%
   if (
     t === "hash" ||
     t === "hash-md5" ||
@@ -48,27 +66,49 @@ function resolveWeights(type: string, mispMatchCount: number): WeightProfile {
     t === "hash-sha256" ||
     t.includes("hash")
   ) {
-    return { vt: 1.0, abuse: 0.0, misp: 0.0, label: "Hash" };
+    return {
+      vt: 1.0,
+      abuse: 0.0,
+      misp: 0.0,
+      label: "Hash",
+    };
   }
 
-  // Domain, URL → VT 65%, MISP 35%
+  // Domain / URL → VT 65%, MISP 35%
   if (t === "domain" || t === "url") {
-    return { vt: 0.65, abuse: 0.0, misp: 0.35, label: "Domain/URL" };
+    return {
+      vt: 0.65,
+      abuse: 0.0,
+      misp: 0.35,
+      label: "Domain/URL",
+    };
   }
 
-  // IP — split by MISP presence
+  // IP
   if (t === "ip") {
-    if (mispMatchCount > 0) {
-      // IP with known campaign
-      return { vt: 0.5, abuse: 0.2, misp: 0.3, label: "IP (Known Campaign)" };
-    } else {
-      // IP without campaign
-      return { vt: 0.65, abuse: 0.35, misp: 0.0, label: "IP (No Campaign)" };
+    if (hasMISP) {
+      return {
+        vt: 0.5,
+        abuse: 0.2,
+        misp: 0.3,
+        label: "IP (Known Campaign)",
+      };
     }
+
+    return {
+      vt: 0.65,
+      abuse: 0.35,
+      misp: 0.0,
+      label: "IP (No Campaign)",
+    };
   }
 
-  // Fallback: treat like IP no campaign
-  return { vt: 0.65, abuse: 0.35, misp: 0.0, label: "Unknown Type" };
+  return {
+    vt: 0.65,
+    abuse: 0.35,
+    misp: 0.0,
+    label: "Unknown Type",
+  };
 }
 
 // ══════════════════════════════════════════════════════
@@ -122,9 +162,21 @@ export function generateCorrelationInsights({
   // ── Resolve weights based on IoC type + MISP presence ──
   const weights = resolveWeights(type, mispMatchCount);
 
-  // ── Derive MISP score (0–100) from matchCount ──
-  // Cap at 5 matches = 100, scale linearly
-  const mispScore = Math.min(100, mispMatchCount * 20);
+  // ── Derive MISP score (0–100) from threatLevel ──
+  // Threat level dari MISP berupa kata, jadi dipetakan ke angka internal
+  function mapMISPThreatLevelToScore(threatLevel?: string | null): number {
+    const level = String(threatLevel || "").toLowerCase();
+
+    if (level === "high") return 100;
+    if (level === "medium") return 75;
+    if (level === "low") return 50;
+    if (level === "undefined") return 25;
+
+    return 0;
+  }
+
+  const mispScore =
+    mispMatchCount > 0 ? mapMISPThreatLevelToScore(mispData.threatLevel) : 0;
 
   // ── Calculate weighted confidence score ──
   const weightedScore = calculateWeightedScore(
