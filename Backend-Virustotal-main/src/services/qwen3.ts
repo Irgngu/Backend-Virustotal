@@ -112,7 +112,6 @@ function buildMISPBlock(mispData: any): string {
 
   return [
     `Matched Events : ${mispData.matchCount}`,
-    `Confidence     : ${mispData.confidence}`,
     `Threat Level   : ${mispData.threatLevel}`,
     `Threat Actor   : ${mispData.threatActor ?? "Unknown"}`,
     `Source Org     : ${mispData.sourceOrg ?? "-"}`,
@@ -456,6 +455,7 @@ ${mispBlock}
 ${
   !isFile
     ? `
+
 --------------------------------------------------
 
 WHOIS INTELLIGENCE
@@ -488,12 +488,6 @@ ${peHeaderBlock}
 MITRE ATT&CK ANALYSIS
 
 ${mitreBlock}
-
---------------------------------------------------
-
-THREAT ACTOR
-
-${mispData?.threatActor ?? "Unknown"}
 
 --------------------------------------------------
 
@@ -548,7 +542,7 @@ REFERENCES
 
   const completion = await callWithRetry(() =>
     client.chat.completions.create({
-      model: "qwen/qwen3-32b",
+      model: "qwen/qwen3-235b-a22b-2507",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },

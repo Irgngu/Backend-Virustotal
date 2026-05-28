@@ -6,6 +6,7 @@ const HISTORY_FILE = path.join(DATA_DIR, "history.json");
 
 export interface HistoryEntry {
   reportId: string;
+  userId?: string;
   username: string;
   email: string;
   ioc: string;
