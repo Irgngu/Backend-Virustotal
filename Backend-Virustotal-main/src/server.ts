@@ -432,6 +432,98 @@ app.get("/admin/activity-logs", async (c) => {
   }
 });
 
+app.put("/profile", async (c) => {
+  try {
+    const { user, error } = await getAuthUser(c);
+
+    if (error || !user) {
+      return c.json(
+        {
+          success: false,
+          error: "Unauthorized",
+        },
+        401,
+      );
+    }
+
+    const { name } = await c.req.json();
+
+    if (!name || !String(name).trim()) {
+      return c.json(
+        {
+          success: false,
+          error: "Name is required",
+        },
+        400,
+      );
+    }
+
+    const cleanName = String(name).trim();
+
+    const { data, error: updateError } =
+      await supabase.auth.admin.updateUserById(user.id, {
+        user_metadata: {
+          ...user.user_metadata,
+          name: cleanName,
+          full_name: cleanName,
+        },
+      });
+
+    if (updateError) {
+      return c.json(
+        {
+          success: false,
+          error: updateError.message,
+        },
+        400,
+      );
+    }
+
+    const { error: profileError } = await supabase.from("profiles").upsert({
+      id: user.id,
+      email: user.email,
+      name: cleanName,
+      updated_at: new Date().toISOString(),
+    });
+
+    if (profileError) {
+      return c.json(
+        {
+          success: false,
+          error: profileError.message,
+        },
+        400,
+      );
+    }
+
+    await writeActivityLog(c, "UPDATE_PROFILE", "PROFILE", {
+      updatedFields: {
+        name: true,
+      },
+    });
+
+    return c.json({
+      success: true,
+      user: data.user,
+      profile: {
+        id: user.id,
+        email: user.email,
+        name: cleanName,
+      },
+    });
+  } catch (error: any) {
+    console.error("[UPDATE PROFILE ERROR]", error);
+
+    return c.json(
+      {
+        success: false,
+        error: error.message || "Failed to update profile",
+      },
+      500,
+    );
+  }
+});
+
 /* ===============================
    MISP ONLY
 ============================== */
