@@ -162,6 +162,21 @@ async function requireAdminUser(c: any) {
   };
 }
 
+function getClientIp(c: any): string {
+  const forwardedFor = c.req.header("x-forwarded-for");
+
+  if (forwardedFor) {
+    return forwardedFor.split(",")[0].trim();
+  }
+
+  return (
+    c.req.header("cf-connecting-ip") ||
+    c.req.header("x-real-ip") ||
+    c.req.header("x-client-ip") ||
+    "localhost"
+  );
+}
+
 async function writeActivityLog(
   c: any,
   action: string,
@@ -177,10 +192,7 @@ async function writeActivityLog(
       action,
       module,
       details: details ?? {},
-      ip_address:
-        c.req.header("x-forwarded-for") ||
-        c.req.header("cf-connecting-ip") ||
-        null,
+      ip_address: getClientIp(c),
     });
   } catch (error) {
     console.error("[ACTIVITY LOG ERROR]", error);
