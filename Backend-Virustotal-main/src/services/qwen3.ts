@@ -491,14 +491,6 @@ ${mitreBlock}
 
 --------------------------------------------------
 
-INDICATORS OF COMPROMISE
-
-| Type | Indicator | Confidence |
-|------|----------|------------|
-| ${type} | ${indicator} | ${confidence}/100 |
-
---------------------------------------------------
-
 IMPACT ANALYSIS
 
 Explain impact based on CVE severity, affected versions, exploit availability, and MITRE techniques.
