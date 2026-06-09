@@ -317,6 +317,53 @@ async function callWithRetry(fn: () => Promise<any>, retries = 3) {
   }
 }
 
+function buildReferences(data: any): string {
+  const refs: string[] = [];
+
+  // VirusTotal selalu muncul karena menjadi sumber utama overview
+  refs.push("VirusTotal");
+
+  // AbuseIPDB hanya muncul jika bukan file/hash dan datanya ada
+  const isFile = data.type === "file" || data.type?.startsWith("hash");
+
+  if (!isFile && data.abuseipdb) {
+    refs.push("AbuseIPDB");
+  }
+
+  // MISP hanya muncul jika ada korelasi
+  if (data.mispData && data.mispData.matchCount > 0) {
+    refs.push("MISP");
+  }
+
+  // NVD hanya muncul jika ada CVE
+  if (data.cveMatches && data.cveMatches.length > 0) {
+    refs.push("NVD");
+  }
+
+  // MITRE hanya muncul jika ada data technique/mitigation
+  if (
+    data.mitreData &&
+    (data.mitreData.primaryTechnique ||
+      data.mitreData.techniques?.length > 0 ||
+      data.mitreData.mitigations?.length > 0)
+  ) {
+    refs.push("MITRE ATT&CK");
+  }
+
+  // WHOIS hanya muncul jika bukan file/hash dan datanya ada
+  if (!isFile && data.whoisData) {
+    refs.push("WHOIS");
+  }
+
+  return [
+    "--------------------------------------------------",
+    "",
+    "REFERENCES",
+    "",
+    ...refs.map((ref) => `- ${ref}`),
+  ].join("\n");
+}
+
 // ══════════════════════════════════════════════════════
 // MAIN FUNCTION
 // ══════════════════════════════════════════════════════
@@ -520,16 +567,6 @@ CONCLUSION
 
 Summarize the threat.
 
---------------------------------------------------
-
-REFERENCES
-
-- VirusTotal
-- AbuseIPDB
-- MISP
-- NVD
-- MITRE ATT&CK
-- WHOIS
 `;
 
   const completion = await callWithRetry(() =>
@@ -540,11 +577,20 @@ REFERENCES
         { role: "user", content: userPrompt },
       ],
       temperature: 0.3,
-      max_tokens: 2500,
+      max_tokens: 3000,
     }),
   );
 
   const raw = completion.choices?.[0]?.message?.content || "No response";
 
-  return formatReport(raw);
+  const formattedReport = formatReport(raw);
+
+  const dynamicReferences = buildReferences(data);
+
+  const reportWithoutReferences = formattedReport.replace(
+    /--------------------------------------------------\s*\n\s*REFERENCES[\s\S]*$/i,
+    "",
+  );
+
+  return `${reportWithoutReferences.trim()}\n\n${dynamicReferences.trim()}`;
 }
