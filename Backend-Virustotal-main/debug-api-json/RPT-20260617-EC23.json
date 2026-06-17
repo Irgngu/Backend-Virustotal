@@ -1,0 +1,84 @@
+{
+  "reportId": "RPT-20260617-EC23",
+  "type": "url",
+  "indicator": "https://chatgpt.com/share/6a328e9c-68b8-83ec-b5fa-80e04764fd32",
+  "malicious": 0,
+  "suspicious": 0,
+  "harmless": 0,
+  "undetected": 0,
+  "abuseScore": 0,
+  "totalReports": 0,
+  "totalVendors": 0,
+  "mispData": {
+    "matchCount": 0,
+    "title": null,
+    "attributes": 0,
+    "threatLevel": null,
+    "sourceOrg": null,
+    "ownerOrg": null,
+    "firstRecordedChange": null,
+    "lastChange": null,
+    "firstSeen": null,
+    "lastSeen": null,
+    "lastUpdated": null,
+    "publishDate": null,
+    "firstPublishDate": null,
+    "lastPublishDate": null,
+    "eventDate": null,
+    "published": false,
+    "publishedCount": 0,
+    "correlation": false,
+    "threatActor": null,
+    "tlp": null,
+    "uuid": null,
+    "eventId": null,
+    "tags": [],
+    "campaigns": [],
+    "raw": {
+      "response": {
+        "Attribute": []
+      }
+    }
+  },
+  "cveMatches": [],
+  "cveRiskScore": {
+    "score": 0,
+    "highest_cvss": 0,
+    "critical_count": 0,
+    "high_count": 0,
+    "medium_count": 0,
+    "exploit_count": 0
+  },
+  "correlationInsights": "Weight profile applied [Domain/URL]: VirusTotal 65% · AbuseIPDB 0% · MISP 35%.\n\nWeighted confidence score: 0/100 → Classification: Low or Benign.\n\nLow detection: Only 0/0 vendors flagged this indicator (0.0%), indicating low visibility or a new threat.\n\nAbuseIPDB not weighted for this IoC type (url) — score 0% excluded from confidence calculation.\n\nNo threat intelligence correlation: 0 matches found in MISP, indicating no known association with tracked campaigns.\n\nNo CVE correlation found: No known vulnerabilities directly linked to this indicator from VirusTotal tags, AbuseIPDB reports, or MISP attributes.\n\nOverall Assessment: LOW RISK — Weighted confidence score 0/100 shows limited threat evidence. Continued observation is advised.",
+  "mitreData": {
+    "primaryTechnique": null,
+    "primaryTechniqueName": null,
+    "techniques": [],
+    "mitigations": [
+      {
+        "id": "NIST-IR-1",
+        "name": "Document & Escalate Finding",
+        "description": "Record all findings with timestamps in your incident tracking system. Escalate to SOC Tier 2 if threat level is HIGH or CRITICAL. Aligns with NIST SP 800-61r2 Section 3.2 (Detection & Analysis).",
+        "framework": "NIST SP 800-61r2"
+      },
+      {
+        "id": "NIST-IR-2",
+        "name": "Update Threat Intelligence Feeds",
+        "description": "Export this IOC to SIEM and TIP. Create correlation detection rules. Share with relevant ISACs. Aligns with NIST CSF DE.AE-2 and MITRE ATT&CK D3FEND.",
+        "framework": "NIST CSF + MITRE D3FEND"
+      },
+      {
+        "id": "NIST-IR-3",
+        "name": "Post-Incident Review",
+        "description": "Conduct a lessons-learned review after containment. Update detection playbooks and IR runbooks. Aligns with NIST SP 800-61r2 Section 3.4 (Post-Incident Activity).",
+        "framework": "NIST SP 800-61r2"
+      }
+    ],
+    "cve": null,
+    "cwe": null
+  },
+  "whoisData": null,
+  "history": null,
+  "pe_header": null,
+  "abuseipdb": null
+}

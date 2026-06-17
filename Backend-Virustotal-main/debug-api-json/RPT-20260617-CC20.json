@@ -1,0 +1,316 @@
+{
+  "reportId": "RPT-20260617-CC20",
+  "type": "domain",
+  "indicator": "ameteksen.com",
+  "malicious": 14,
+  "suspicious": 2,
+  "harmless": 45,
+  "undetected": 30,
+  "abuseScore": 0,
+  "totalReports": 0,
+  "totalVendors": 91,
+  "mispData": {
+    "matchCount": 2,
+    "title": "OSINT Black Vine: Formidable cyberespionage group targeted aerospace, healthcare since 2012 by Symantec",
+    "attributes": 986,
+    "threatLevel": "Medium",
+    "sourceOrg": "CthulhuSPRL.be",
+    "ownerOrg": "Aulia CTI Lab",
+    "firstRecordedChange": "2015-07-28 19:53:42",
+    "lastChange": "2016-06-21 11:50:40",
+    "firstSeen": "2016-02-24 15:51:47",
+    "lastSeen": "2016-06-21 11:50:40",
+    "lastUpdated": "2016-06-21 11:50:40",
+    "publishDate": "2026-05-14 14:15:44",
+    "firstPublishDate": "2026-05-14 12:05:36",
+    "lastPublishDate": "2026-05-14 14:15:44",
+    "eventDate": "2015-07-28",
+    "published": true,
+    "publishedCount": 2,
+    "correlation": true,
+    "threatActor": "Black Vine",
+    "tlp": "tlp:white",
+    "uuid": "55b7c901-614c-44d1-a638-440e950d210b",
+    "eventId": 1,
+    "tags": [
+      "type:OSINT",
+      "tlp:white"
+    ],
+    "campaigns": [
+      "type:OSINT"
+    ],
+    "raw": {
+      "response": {
+        "Attribute": [
+          {
+            "id": 4,
+            "event_id": 1,
+            "object_id": 0,
+            "object_relation": null,
+            "category": "Network activity",
+            "type": "domain",
+            "to_ids": true,
+            "uuid": "55b7ddc6-c468-4b2c-82da-ce26950d210b",
+            "timestamp": 1438113222,
+            "distribution": 5,
+            "sharing_group_id": 0,
+            "comment": "Imported via the freetext import.",
+            "deleted": false,
+            "disable_correlation": false,
+            "first_seen": null,
+            "last_seen": null,
+            "value": "ameteksen.com",
+            "Event": {
+              "id": 1,
+              "orgc_id": 2,
+              "org_id": 1,
+              "date": "2015-07-28",
+              "threat_level_id": 2,
+              "info": "OSINT Black Vine: Formidable cyberespionage group targeted aerospace, healthcare since 2012 by Symantec",
+              "published": true,
+              "uuid": "55b7c901-614c-44d1-a638-440e950d210b",
+              "analysis": 2,
+              "timestamp": 1456329107,
+              "distribution": 3,
+              "publish_timestamp": 1778760336,
+              "sharing_group_id": 0,
+              "extends_uuid": "",
+              "Tag": [
+                {
+                  "local": false,
+                  "id": 8,
+                  "name": "type:OSINT",
+                  "colour": "#004646",
+                  "numerical_value": null
+                },
+                {
+                  "local": false,
+                  "id": 9,
+                  "name": "tlp:white",
+                  "colour": "#ffffff",
+                  "numerical_value": null
+                }
+              ],
+              "Orgc": {
+                "id": 2,
+                "name": "CthulhuSPRL.be",
+                "uuid": "55f6ea5f-fd34-43b8-ac1d-40cb950d210f"
+              },
+              "Org": {
+                "id": 1,
+                "name": "Aulia CTI Lab",
+                "uuid": "9d693b1b-13d3-4385-a4ae-29dfa3389675"
+              },
+              "ThreatLevel": {
+                "id": 3,
+                "name": "Low"
+              }
+            },
+            "Tag": [
+              {
+                "id": 8,
+                "name": "type:OSINT",
+                "colour": "#004646",
+                "numerical_value": null,
+                "inherited": 1
+              },
+              {
+                "id": 9,
+                "name": "tlp:white",
+                "colour": "#ffffff",
+                "numerical_value": null,
+                "inherited": 1
+              }
+            ]
+          },
+          {
+            "id": 240612,
+            "event_id": 1187,
+            "object_id": 0,
+            "object_relation": null,
+            "category": "Network activity",
+            "type": "domain",
+            "to_ids": true,
+            "uuid": "56cce211-f5a4-4221-a19e-52819062e56a",
+            "timestamp": 1456267793,
+            "distribution": 5,
+            "sharing_group_id": 0,
+            "comment": "",
+            "deleted": false,
+            "disable_correlation": false,
+            "first_seen": null,
+            "last_seen": null,
+            "value": "ameteksen.com",
+            "Event": {
+              "id": 1187,
+              "orgc_id": 20,
+              "org_id": 1,
+              "date": "2015-07-01",
+              "threat_level_id": 3,
+              "info": "BlackVine - Symantec",
+              "published": true,
+              "uuid": "56cce206-fc70-436c-881b-52819062e56a",
+              "analysis": 2,
+              "timestamp": 1466509840,
+              "distribution": 3,
+              "publish_timestamp": 1778768144,
+              "sharing_group_id": 0,
+              "extends_uuid": "",
+              "Tag": [
+                {
+                  "local": false,
+                  "id": 9,
+                  "name": "tlp:white",
+                  "colour": "#ffffff",
+                  "numerical_value": null
+                }
+              ],
+              "Orgc": {
+                "id": 20,
+                "name": "CUDESO",
+                "uuid": "56c42374-fdb8-4544-a218-41ffc0a8ab16"
+              },
+              "Org": {
+                "id": 1,
+                "name": "Aulia CTI Lab",
+                "uuid": "9d693b1b-13d3-4385-a4ae-29dfa3389675"
+              },
+              "ThreatLevel": {
+                "id": 4,
+                "name": "Undefined"
+              }
+            },
+            "Tag": [
+              {
+                "id": 9,
+                "name": "tlp:white",
+                "colour": "#ffffff",
+                "numerical_value": null,
+                "inherited": 1
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "cveMatches": [],
+  "cveRiskScore": {
+    "score": 0,
+    "highest_cvss": 0,
+    "critical_count": 0,
+    "high_count": 0,
+    "medium_count": 0,
+    "exploit_count": 0
+  },
+  "correlationInsights": "Weight profile applied [Domain/URL]: VirusTotal 65% · AbuseIPDB 0% · MISP 35%.\n\nWeighted confidence score: 36/100 → Classification: Medium or Suspicious.\n\nModerate detection: 14/91 vendors flagged this indicator (15.4%), suggesting a potentially emerging or evasive threat.\n\nAbuseIPDB not weighted for this IoC type (domain) — score 0% excluded from confidence calculation.\n\nThreat intelligence correlation: 2 matching event(s) found in MISP, linking this indicator to known campaigns.\n\nNo CVE correlation found: No known vulnerabilities directly linked to this indicator from VirusTotal tags, AbuseIPDB reports, or MISP attributes.\n\nOverall Assessment: HIGH RISK — Weighted confidence score 36/100 indicates partial threat signal. Further monitoring and defensive action recommended.",
+  "mitreData": {
+    "primaryTechnique": "T1598",
+    "primaryTechniqueName": "Phishing for Information",
+    "techniques": [
+      {
+        "technique": "T1598",
+        "techniqueName": "Phishing for Information",
+        "tactic": "Reconnaissance",
+        "confidence": 60,
+        "reasons": []
+      },
+      {
+        "technique": "T1566",
+        "techniqueName": "Phishing",
+        "tactic": "Initial Access",
+        "confidence": 55,
+        "reasons": []
+      },
+      {
+        "technique": "T1204",
+        "techniqueName": "User Execution",
+        "tactic": "Execution",
+        "confidence": 40,
+        "reasons": [
+          "Tags indicate user-executed malware delivery"
+        ]
+      }
+    ],
+    "mitigations": [
+      {
+        "id": "M1017",
+        "name": "User Training",
+        "description": "Users can be trained to identify social engineering techniques and spearphishing attempts.",
+        "framework": "MITRE ATT&CK"
+      },
+      {
+        "id": "M1054",
+        "name": "Software Configuration",
+        "description": "Use anti-spoofing and email authentication mechanisms to filter messages based on validity checks of the sender domain (using SPF) and integrity of messages (using DKIM). Enabling these mechanisms within an organization (through policies such as DMARC) may enable recipients (intra-org and cross domain) to perform similar message filtering and validation.",
+        "framework": "MITRE ATT&CK"
+      },
+      {
+        "id": "M1049",
+        "name": "Antivirus/Antimalware",
+        "description": "Anti-virus can automatically quarantine suspicious files.",
+        "framework": "MITRE ATT&CK"
+      },
+      {
+        "id": "M1047",
+        "name": "Audit",
+        "description": "Perform audits or scans of systems, permissions, insecure software, insecure configurations, etc. to identify potential weaknesses.",
+        "framework": "MITRE ATT&CK"
+      },
+      {
+        "id": "M1031",
+        "name": "Network Intrusion Prevention",
+        "description": "Network intrusion prevention systems and systems designed to scan and remove malicious email attachments or links can be used to block activity.",
+        "framework": "MITRE ATT&CK"
+      },
+      {
+        "id": "M1021",
+        "name": "Restrict Web-Based Content",
+        "description": "Determine if certain websites or attachment types (ex: .scr, .exe, .pif, .cpl, etc.) that can be used for phishing are necessary for business operations and consider blocking access if activity cannot be monitored well or if it poses a significant risk.",
+        "framework": "MITRE ATT&CK"
+      },
+      {
+        "id": "M1038",
+        "name": "Execution Prevention",
+        "description": "Application control may be able to prevent the running of executables masquerading as other files.",
+        "framework": "MITRE ATT&CK"
+      },
+      {
+        "id": "M1040",
+        "name": "Behavior Prevention on Endpoint",
+        "description": "On Windows 10, enable Attack Surface Reduction (ASR) rules to prevent executable files from running unless they meet a prevalence, age, or trusted list criteria and to prevent Office applications from creating potentially malicious executable content by blocking malicious code from being written to disk. Note: cloud-delivered protection must be enabled to use certain rules.",
+        "framework": "MITRE ATT&CK"
+      },
+      {
+        "id": "M1033",
+        "name": "Limit Software Installation",
+        "description": "Where possible, consider requiring developers to pull from internal repositories containing verified and approved packages rather than from external ones.",
+        "framework": "MITRE ATT&CK"
+      },
+      {
+        "id": "NIST-IR-1",
+        "name": "Document & Escalate Finding",
+        "description": "Record all findings with timestamps in your incident tracking system. Escalate to SOC Tier 2 if threat level is HIGH or CRITICAL. Aligns with NIST SP 800-61r2 Section 3.2 (Detection & Analysis).",
+        "framework": "NIST SP 800-61r2"
+      },
+      {
+        "id": "NIST-IR-2",
+        "name": "Update Threat Intelligence Feeds",
+        "description": "Export this IOC to SIEM and TIP. Create correlation detection rules. Share with relevant ISACs. Aligns with NIST CSF DE.AE-2 and MITRE ATT&CK D3FEND.",
+        "framework": "NIST CSF + MITRE D3FEND"
+      },
+      {
+        "id": "NIST-IR-3",
+        "name": "Post-Incident Review",
+        "description": "Conduct a lessons-learned review after containment. Update detection playbooks and IR runbooks. Aligns with NIST SP 800-61r2 Section 3.4 (Post-Incident Activity).",
+        "framework": "NIST SP 800-61r2"
+      }
+    ],
+    "cve": null,
+    "cwe": null
+  },
+  "whoisData": null,
+  "history": null,
+  "pe_header": null,
+  "abuseipdb": null
+}
