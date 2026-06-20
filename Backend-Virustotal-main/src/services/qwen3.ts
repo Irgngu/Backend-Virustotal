@@ -476,7 +476,6 @@ THREAT INTELLIGENCE REPORT
 --------------------------------------------------
 Report ID : ${reportId}
 Date: ${now}
-Source: VirusTotal, AbuseIPDB, MISP, NVD, MITRE ATT&CK, RIPE WHOIS
 --------------------------------------------------
 
 EXECUTIVE SUMMARY
@@ -566,19 +565,6 @@ Explain impact based on CVE severity, affected versions, exploit availability, a
 MITIGATION STRATEGIES
 
 ${mitigationBlock}
-
-Also include CVE remediation actions from NVD references when available.
-
---------------------------------------------------
-
-COURSE OF ACTION
-
-- Block indicator
-- Monitor related traffic
-- Review affected product versions
-- Apply vendor patches if remediation references are available
-- Patch vulnerabilities
-- Monitor for exploitation attempts
 
 --------------------------------------------------
 

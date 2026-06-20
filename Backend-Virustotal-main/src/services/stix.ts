@@ -1,4 +1,16 @@
-import { randomUUID } from "crypto";
+import { randomUUID, createHash } from "crypto";
+
+type StixExternalReference = {
+  source_name: string;
+  description?: string;
+  external_id?: string;
+  url?: string;
+};
+
+/**
+ * STIX 2.1 namespace for deterministic UUIDv5 cyber observable IDs.
+ */
+const STIX_SCO_NAMESPACE = "00abedb4-aa42-466c-9c01-fed23315a9b7";
 
 function isoNow() {
   return new Date().toISOString();
@@ -10,12 +22,188 @@ function stixId(type: string) {
 
 function cleanString(value: any, fallback = "-") {
   if (value === null || value === undefined || value === "") return fallback;
-  return String(value);
+  const str = String(value).trim();
+  return str === "" ? fallback : str;
+}
+
+function optionalString(value: any) {
+  if (value === null || value === undefined || value === "") return undefined;
+  const str = String(value).trim();
+  if (str === "" || str === "-") return undefined;
+  return str;
+}
+
+function toNumber(value: any, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function clampScore(value: any, fallback = 0) {
+  const n = toNumber(value, fallback);
+  return Math.max(0, Math.min(100, Math.round(n)));
+}
+
+function escapeStixPatternValue(value: any) {
+  return cleanString(value).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+
+function makeExternalReference(
+  sourceName: any,
+  description?: any,
+  externalId?: any,
+  url?: any,
+): StixExternalReference {
+  const ref: StixExternalReference = {
+    source_name: cleanString(sourceName, "Unknown Source"),
+  };
+
+  const desc = optionalString(description);
+  const extId = optionalString(externalId);
+  const link = optionalString(url);
+
+  if (desc) ref.description = desc;
+  if (extId) ref.external_id = extId;
+  if (link) ref.url = link;
+
+  if (!ref.description && !ref.external_id && !ref.url) {
+    ref.description = `External reference source: ${ref.source_name}`;
+  }
+
+  return ref;
+}
+
+function uuidToBytes(uuid: string) {
+  const hex = uuid.replace(/-/g, "");
+
+  if (!/^[0-9a-fA-F]{32}$/.test(hex)) {
+    throw new Error(`Invalid UUID namespace: ${uuid}`);
+  }
+
+  return Buffer.from(hex, "hex");
+}
+
+function bytesToUuid(bytes: Buffer) {
+  const hex = bytes.toString("hex");
+
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    hex.slice(12, 16),
+    hex.slice(16, 20),
+    hex.slice(20),
+  ].join("-");
+}
+
+function uuidv5(name: string, namespace: string) {
+  const namespaceBytes = uuidToBytes(namespace);
+
+  const hash = createHash("sha1")
+    .update(namespaceBytes)
+    .update(name, "utf8")
+    .digest();
+
+  const bytes = Buffer.from(hash.subarray(0, 16));
+
+  if (bytes.length < 16) {
+    throw new Error("Invalid SHA-1 hash length for UUIDv5 generation");
+  }
+
+  bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x50;
+  bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
+
+  return bytesToUuid(bytes);
+}
+
+function canonicalJson(value: any): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
+  }
+
+  const keys = Object.keys(value)
+    .filter((key) => value[key] !== undefined)
+    .sort();
+
+  return `{${keys
+    .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
+    .join(",")}}`;
+}
+
+function scoId(type: string, idContributingProperties: any) {
+  const canonical = canonicalJson(idContributingProperties);
+  return `${type}--${uuidv5(canonical, STIX_SCO_NAMESPACE)}`;
+}
+
+function extractScoreFromText(text: any) {
+  const value = optionalString(text);
+  if (!value) return undefined;
+
+  const match = value.match(
+    /(?:weighted\s+confidence\s+score|confidence\s+score|risk\s+score)\s*[:=]\s*(\d{1,3})\s*\/\s*100/i,
+  );
+
+  if (!match) return undefined;
+  return clampScore(match[1]);
+}
+
+function detectThreatLevel(confidence: number, text: any) {
+  const value = optionalString(text)?.toLowerCase() || "";
+
+  if (value.includes("critical") || value.includes("high risk")) {
+    return "high";
+  }
+
+  if (
+    value.includes("medium") ||
+    value.includes("suspicious") ||
+    value.includes("moderate")
+  ) {
+    return "medium";
+  }
+
+  if (value.includes("low")) {
+    return "low";
+  }
+
+  if (confidence >= 70) return "high";
+  if (confidence >= 30) return "medium";
+  return "low";
+}
+
+function extractCveId(value: any) {
+  const str = optionalString(value);
+  if (!str) return undefined;
+
+  const match = str.match(/CVE-\d{4}-\d{4,}/i);
+  if (!match) return undefined;
+
+  return match[0].toUpperCase();
+}
+
+function detectHashAlgorithm(type: string, indicator: string) {
+  const t = cleanString(type).toLowerCase();
+  const value = cleanString(indicator);
+
+  if (t === "sha256" || t === "hash-sha256") return "SHA-256";
+  if (t === "sha1" || t === "hash-sha1") return "SHA-1";
+  if (t === "md5" || t === "hash-md5") return "MD5";
+
+  if (t === "hash" || t === "file") {
+    if (/^[a-fA-F0-9]{64}$/.test(value)) return "SHA-256";
+    if (/^[a-fA-F0-9]{40}$/.test(value)) return "SHA-1";
+    if (/^[a-fA-F0-9]{32}$/.test(value)) return "MD5";
+  }
+
+  return null;
 }
 
 function getIndicatorPattern(type: string, indicator: string) {
   const t = cleanString(type).toLowerCase();
-  const value = cleanString(indicator).replace(/'/g, "\\'");
+  const value = escapeStixPatternValue(indicator);
+  const hashAlgorithm = detectHashAlgorithm(type, indicator);
 
   if (t === "ip" || t === "ipv4" || t === "ipv4-addr") {
     return `[ipv4-addr:value = '${value}']`;
@@ -25,7 +213,7 @@ function getIndicatorPattern(type: string, indicator: string) {
     return `[ipv6-addr:value = '${value}']`;
   }
 
-  if (t === "domain" || t === "domain-name") {
+  if (t === "domain" || t === "domain-name" || t === "hostname") {
     return `[domain-name:value = '${value}']`;
   }
 
@@ -33,96 +221,144 @@ function getIndicatorPattern(type: string, indicator: string) {
     return `[url:value = '${value}']`;
   }
 
-  if (t === "sha256" || t === "hash-sha256" || t === "hash" || t === "file") {
-    return `[file:hashes.'SHA-256' = '${value}']`;
+  if (hashAlgorithm) {
+    return `[file:hashes.'${hashAlgorithm}' = '${value}']`;
   }
 
-  if (t === "sha1" || t === "hash-sha1") {
-    return `[file:hashes.'SHA-1' = '${value}']`;
-  }
-
-  if (t === "md5" || t === "hash-md5") {
-    return `[file:hashes.MD5 = '${value}']`;
-  }
-
-  return `[artifact:payload_bin MATCHES '${value}']`;
+  throw new Error(
+    `Unsupported or invalid IOC type/hash format for STIX pattern: type=${type}, indicator=${indicator}`,
+  );
 }
 
-function getObservableObject(type: string, indicator: string, created: string) {
+function getObservableObject(type: string, indicator: string) {
   const t = cleanString(type).toLowerCase();
   const value = cleanString(indicator);
+  const hashAlgorithm = detectHashAlgorithm(type, indicator);
 
   if (t === "ip" || t === "ipv4" || t === "ipv4-addr") {
+    const idProps = { value };
+
     return {
       type: "ipv4-addr",
       spec_version: "2.1",
-      id: stixId("ipv4-addr"),
+      id: scoId("ipv4-addr", idProps),
       value,
     };
   }
 
   if (t === "ipv6" || t === "ipv6-addr") {
+    const idProps = { value };
+
     return {
       type: "ipv6-addr",
       spec_version: "2.1",
-      id: stixId("ipv6-addr"),
+      id: scoId("ipv6-addr", idProps),
       value,
     };
   }
 
-  if (t === "domain" || t === "domain-name") {
+  if (t === "domain" || t === "domain-name" || t === "hostname") {
+    const idProps = { value };
+
     return {
       type: "domain-name",
       spec_version: "2.1",
-      id: stixId("domain-name"),
+      id: scoId("domain-name", idProps),
       value,
     };
   }
 
   if (t === "url") {
+    const idProps = { value };
+
     return {
       type: "url",
       spec_version: "2.1",
-      id: stixId("url"),
+      id: scoId("url", idProps),
       value,
     };
   }
 
-  if (t === "sha256" || t === "hash-sha256" || t === "hash" || t === "file") {
-    return {
-      type: "file",
-      spec_version: "2.1",
-      id: stixId("file"),
-      hashes: {
-        "SHA-256": value,
-      },
+  if (hashAlgorithm) {
+    const hashes = {
+      [hashAlgorithm]: value,
     };
-  }
 
-  if (t === "sha1" || t === "hash-sha1") {
+    const idProps = { hashes };
+
     return {
       type: "file",
       spec_version: "2.1",
-      id: stixId("file"),
-      hashes: {
-        "SHA-1": value,
-      },
-    };
-  }
-
-  if (t === "md5" || t === "hash-md5") {
-    return {
-      type: "file",
-      spec_version: "2.1",
-      id: stixId("file"),
-      hashes: {
-        MD5: value,
-      },
+      id: scoId("file", idProps),
+      hashes,
     };
   }
 
   return null;
 }
+
+function buildDetectionSummary(data: {
+  malicious: any;
+  suspicious: any;
+  harmless: any;
+  undetected: any;
+  totalVendors: any;
+  abuseScore: any;
+  totalReports: any;
+  mispMatchCount: any;
+  threatLevel: string;
+  confidence: number;
+}) {
+  return [
+    `Threat level: ${data.threatLevel.toUpperCase()}.`,
+    `Confidence score: ${data.confidence}/100.`,
+    `VirusTotal detection: malicious=${data.malicious}, suspicious=${data.suspicious}, harmless=${data.harmless}, undetected=${data.undetected}, total_vendors=${data.totalVendors}.`,
+    `AbuseIPDB summary: abuse_score=${data.abuseScore}, total_reports=${data.totalReports}.`,
+    `MISP correlation: matched_events=${data.mispMatchCount}.`,
+  ].join(" ");
+}
+
+function buildObservedSummary(params: {
+  whoisData: any;
+  history: any;
+  pe_header: any;
+  abuseipdb: any;
+}) {
+  const parts: string[] = [];
+
+  if (params.whoisData) {
+    parts.push(`WHOIS/RDAP enrichment is available.`);
+  }
+
+  if (params.history) {
+    parts.push(`Submission or observation history is available.`);
+  }
+
+  if (params.pe_header) {
+    parts.push(`PE header metadata is available.`);
+  }
+
+  if (params.abuseipdb) {
+    const score =
+      params.abuseipdb.abuse_confidence_score ??
+      params.abuseipdb.abuseConfidenceScore ??
+      "-";
+
+    const reports =
+      params.abuseipdb.total_reports ?? params.abuseipdb.totalReports ?? "-";
+
+    parts.push(
+      `AbuseIPDB enrichment is available with abuse score ${score} and total reports ${reports}.`,
+    );
+  }
+
+  if (parts.length === 0) {
+    return "Observed data generated from the submitted indicator.";
+  }
+
+  return parts.join(" ");
+}
+
 export function generateOpenCTISTIX21(data: any) {
   const created = isoNow();
 
@@ -160,18 +396,56 @@ export function generateOpenCTISTIX21(data: any) {
   const indicatorId = stixId("indicator");
   const observedDataId = stixId("observed-data");
 
-  const confidence = Math.min(
-    100,
-    Math.round(
-      malicious * 10 +
-        suspicious * 5 +
-        abuseScore * 0.4 +
-        (mispData?.matchCount || 0) * 10,
-    ),
+  const pushObject = (obj: any, includeInReport = true) => {
+    objects.push(obj);
+
+    if (includeInReport && obj?.id) {
+      objectRefs.push(obj.id);
+    }
+
+    return obj;
+  };
+
+  const pushRelationship = (
+    relationshipType: string,
+    sourceRef: string,
+    targetRef: string,
+  ) => {
+    return pushObject({
+      type: "relationship",
+      spec_version: "2.1",
+      id: stixId("relationship"),
+      created,
+      modified: created,
+      relationship_type: relationshipType,
+      source_ref: sourceRef,
+      target_ref: targetRef,
+    });
+  };
+
+  const computedConfidence = clampScore(
+    toNumber(malicious) * 10 +
+      toNumber(suspicious) * 5 +
+      toNumber(abuseScore) * 0.4 +
+      toNumber(mispData?.matchCount) * 10,
   );
 
-  const threatLevel =
-    confidence >= 70 ? "high" : confidence >= 40 ? "medium" : "low";
+  const extractedConfidence = extractScoreFromText(correlationInsights);
+  const confidence = extractedConfidence ?? computedConfidence;
+  const threatLevel = detectThreatLevel(confidence, correlationInsights);
+
+  const detectionSummary = buildDetectionSummary({
+    malicious,
+    suspicious,
+    harmless,
+    undetected,
+    totalVendors,
+    abuseScore,
+    totalReports,
+    mispMatchCount: mispData?.matchCount || 0,
+    threatLevel,
+    confidence,
+  });
 
   const identityObject = {
     type: "identity",
@@ -183,8 +457,7 @@ export function generateOpenCTISTIX21(data: any) {
     identity_class: "organization",
   };
 
-  objects.push(identityObject);
-  objectRefs.push(identityId);
+  pushObject(identityObject);
 
   const indicatorObject = {
     type: "indicator",
@@ -194,9 +467,7 @@ export function generateOpenCTISTIX21(data: any) {
     modified: created,
     created_by_ref: identityId,
     name: `${cleanString(type).toUpperCase()} Indicator - ${cleanString(indicator)}`,
-    description:
-      correlationInsights ||
-      `Indicator generated from VirusTotal, AbuseIPDB, MISP, NVD, MITRE ATT&CK, and WHOIS enrichment.`,
+    description: `${correlationInsights || "Indicator generated from threat intelligence enrichment."}\n\n${detectionSummary}`,
     indicator_types: ["malicious-activity"],
     pattern: getIndicatorPattern(type, indicator),
     pattern_type: "stix",
@@ -204,39 +475,29 @@ export function generateOpenCTISTIX21(data: any) {
     confidence,
     labels: ["malicious-activity", threatLevel],
     external_references: [
-      {
-        source_name: "VirusTotal",
-        description: `Malicious: ${malicious}, Suspicious: ${suspicious}, Harmless: ${harmless}, Undetected: ${undetected}, Total Vendors: ${totalVendors}`,
-      },
-      {
-        source_name: "AbuseIPDB",
-        description: `Abuse Score: ${abuseScore}, Total Reports: ${totalReports}`,
-      },
-      {
-        source_name: "MISP",
-        description: `Matched Events: ${mispData?.matchCount || 0}`,
-      },
+      makeExternalReference(
+        "VirusTotal",
+        `VirusTotal security vendor analysis. Malicious: ${malicious}, Suspicious: ${suspicious}, Harmless: ${harmless}, Undetected: ${undetected}, Total Vendors: ${totalVendors}.`,
+      ),
+      makeExternalReference(
+        "AbuseIPDB",
+        `AbuseIPDB IP reputation analysis. Abuse Score: ${abuseScore}, Total Reports: ${totalReports}.`,
+      ),
+      makeExternalReference(
+        "MISP",
+        `MISP threat intelligence correlation. Matched Events: ${mispData?.matchCount || 0}.`,
+      ),
     ],
-    x_opencti_score: confidence,
-    x_cti_detection: {
-      malicious,
-      suspicious,
-      harmless,
-      undetected,
-      total_vendors: totalVendors,
-    },
   };
 
-  objects.push(indicatorObject);
-  objectRefs.push(indicatorId);
+  pushObject(indicatorObject);
 
-  const observable = getObservableObject(type, indicator, created);
+  const observable = getObservableObject(type, indicator);
 
   if (observable) {
-    objects.push(observable);
-    objectRefs.push(observable.id);
+    pushObject(observable);
 
-    objects.push({
+    const observedDataObject = {
       type: "observed-data",
       spec_version: "2.1",
       id: observedDataId,
@@ -247,19 +508,16 @@ export function generateOpenCTISTIX21(data: any) {
       last_observed: created,
       number_observed: 1,
       object_refs: [observable.id],
-      x_cti_whois: whoisData,
-      x_cti_history: history,
-      x_cti_pe_header: pe_header,
-      x_cti_abuseipdb: abuseipdb,
-    });
+      labels: ["observed-indicator"],
+    };
 
-    objectRefs.push(observedDataId);
+    pushObject(observedDataObject);
   }
 
   if (mispData?.threatActor && mispData.threatActor !== "Unknown") {
     const threatActorId = stixId("threat-actor");
 
-    objects.push({
+    const threatActorObject = {
       type: "threat-actor",
       spec_version: "2.1",
       id: threatActorId,
@@ -271,28 +529,27 @@ export function generateOpenCTISTIX21(data: any) {
       description: "Threat actor derived from MISP correlation.",
       confidence: 70,
       labels: ["misp-correlated"],
-      x_cti_misp: mispData,
-    });
+      external_references: [
+        makeExternalReference(
+          "MISP",
+          "Threat actor information derived from MISP correlation data.",
+        ),
+      ],
+    };
 
-    objects.push({
-      type: "relationship",
-      spec_version: "2.1",
-      id: stixId("relationship"),
-      created,
-      modified: created,
-      relationship_type: "indicates",
-      source_ref: indicatorId,
-      target_ref: threatActorId,
-    });
-
-    objectRefs.push(threatActorId);
+    pushObject(threatActorObject);
+    pushRelationship("indicates", indicatorId, threatActorId);
   }
 
   if (Array.isArray(mitreData?.techniques)) {
     for (const technique of mitreData.techniques) {
       const attackPatternId = stixId("attack-pattern");
 
-      objects.push({
+      const techniqueId = optionalString(
+        technique.technique || technique.id || technique.techniqueId,
+      );
+
+      const attackPatternObject = {
         type: "attack-pattern",
         spec_version: "2.1",
         id: attackPatternId,
@@ -308,37 +565,38 @@ export function generateOpenCTISTIX21(data: any) {
             ? technique.reasons.join(" ")
             : "MITRE ATT&CK technique correlated from analysis.",
         external_references: [
-          {
-            source_name: "mitre-attack",
-            external_id: cleanString(technique.technique),
-          },
+          makeExternalReference(
+            "mitre-attack",
+            "MITRE ATT&CK technique reference correlated from analysis.",
+            techniqueId,
+          ),
         ],
-        confidence: Number(technique.confidence || 50),
-      });
+        confidence: clampScore(technique.confidence, 50),
+      };
 
-      objects.push({
-        type: "relationship",
-        spec_version: "2.1",
-        id: stixId("relationship"),
-        created,
-        modified: created,
-        relationship_type: "indicates",
-        source_ref: indicatorId,
-        target_ref: attackPatternId,
-      });
-
-      objectRefs.push(attackPatternId);
+      pushObject(attackPatternObject);
+      pushRelationship("indicates", indicatorId, attackPatternId);
     }
   }
 
   if (Array.isArray(cveMatches)) {
     for (const cve of cveMatches) {
-      const cveId = cleanString(cve.cve_id, "");
+      const cveId = extractCveId(
+        cve.cve_id || cve.id || cve.cveId || cve?.cve?.id,
+      );
+
       if (!cveId) continue;
 
       const vulnerabilityId = stixId("vulnerability");
 
-      objects.push({
+      const cvssScore = cve.detail?.cvss_score ?? cve.cvss_score ?? "N/A";
+      const cvssSeverity =
+        cve.detail?.cvss_severity ?? cve.cvss_severity ?? "UNKNOWN";
+
+      const exploitAvailable =
+        cve.detail?.exploit_available ?? cve.exploit_available ?? false;
+
+      const vulnerabilityObject = {
         type: "vulnerability",
         spec_version: "2.1",
         id: vulnerabilityId,
@@ -348,30 +606,18 @@ export function generateOpenCTISTIX21(data: any) {
         name: cveId,
         description:
           cve.detail?.description ||
-          `Vulnerability correlated with indicator ${indicator}.`,
+          cve.description ||
+          `Vulnerability correlated with indicator ${indicator}. CVSS score: ${cvssScore}. Severity: ${cvssSeverity}. Exploit available: ${exploitAvailable}.`,
         external_references: [
           {
-            source_name: "nvd",
+            source_name: "cve",
             external_id: cveId,
           },
         ],
-        x_cti_cvss_score: cve.detail?.cvss_score ?? null,
-        x_cti_cvss_severity: cve.detail?.cvss_severity ?? null,
-        x_cti_exploit_available: cve.detail?.exploit_available ?? false,
-      });
+      };
 
-      objects.push({
-        type: "relationship",
-        spec_version: "2.1",
-        id: stixId("relationship"),
-        created,
-        modified: created,
-        relationship_type: "related-to",
-        source_ref: indicatorId,
-        target_ref: vulnerabilityId,
-      });
-
-      objectRefs.push(vulnerabilityId);
+      pushObject(vulnerabilityObject);
+      pushRelationship("related-to", indicatorId, vulnerabilityId);
     }
   }
 
@@ -379,36 +625,61 @@ export function generateOpenCTISTIX21(data: any) {
     for (const mitigation of mitreData.mitigations) {
       const courseOfActionId = stixId("course-of-action");
 
-      objects.push({
+      const mitigationName = cleanString(
+        mitigation.name,
+        "Recommended Mitigation",
+      );
+
+      const mitigationDescription = cleanString(
+        mitigation.description,
+        "Recommended mitigation action derived from threat intelligence analysis.",
+      );
+
+      const courseOfActionObject = {
         type: "course-of-action",
         spec_version: "2.1",
         id: courseOfActionId,
         created,
         modified: created,
         created_by_ref: identityId,
-        name: cleanString(mitigation.name, "Recommended Mitigation"),
-        description: cleanString(mitigation.description),
+        name: mitigationName,
+        description: mitigationDescription,
         external_references: [
-          {
-            source_name: cleanString(mitigation.framework, "MITRE ATT&CK"),
-            external_id: cleanString(mitigation.id),
-          },
+          makeExternalReference(
+            mitigation.framework || "MITRE ATT&CK",
+            `Mitigation reference for ${mitigationName}.`,
+            mitigation.id,
+          ),
         ],
-      });
+      };
 
-      objects.push({
-        type: "relationship",
-        spec_version: "2.1",
-        id: stixId("relationship"),
-        created,
-        modified: created,
-        relationship_type: "mitigates",
-        source_ref: courseOfActionId,
-        target_ref: indicatorId,
-      });
-
-      objectRefs.push(courseOfActionId);
+      pushObject(courseOfActionObject);
+      pushRelationship("mitigates", courseOfActionId, indicatorId);
     }
+  }
+
+  const observedSummary = buildObservedSummary({
+    whoisData,
+    history,
+    pe_header,
+    abuseipdb,
+  });
+
+  const reportDescriptionParts = [
+    correlationInsights ||
+      `OpenCTI-compatible STIX 2.1 report for ${indicator}.`,
+    detectionSummary,
+    observedSummary,
+  ];
+
+  if (cveRiskScore) {
+    reportDescriptionParts.push(
+      `CVE risk score summary: ${JSON.stringify(cveRiskScore)}.`,
+    );
+  }
+
+  if (reportId) {
+    reportDescriptionParts.push(`Source report ID: ${reportId}.`);
   }
 
   const reportObject = {
@@ -419,23 +690,37 @@ export function generateOpenCTISTIX21(data: any) {
     modified: created,
     created_by_ref: identityId,
     name: `Threat Intelligence Report - ${cleanString(reportId, indicator)}`,
-    description:
-      correlationInsights ||
-      `OpenCTI-compatible STIX 2.1 report for ${indicator}.`,
+    description: reportDescriptionParts.join("\n\n"),
     published: created,
     report_types: ["threat-report"],
     labels: ["cti-report", threatLevel],
     object_refs: [...new Set(objectRefs)],
     external_references: [
-      { source_name: "VirusTotal" },
-      { source_name: "AbuseIPDB" },
-      { source_name: "MISP" },
-      { source_name: "NVD" },
-      { source_name: "MITRE ATT&CK" },
-      { source_name: "WHOIS" },
+      makeExternalReference(
+        "VirusTotal",
+        "VirusTotal enrichment source used for security vendor analysis and detection statistics.",
+      ),
+      makeExternalReference(
+        "AbuseIPDB",
+        "AbuseIPDB enrichment source used for IP reputation, abuse confidence score, and abuse report data.",
+      ),
+      makeExternalReference(
+        "MISP",
+        "MISP threat intelligence source used for community correlation, event matching, and threat context.",
+      ),
+      makeExternalReference(
+        "NVD",
+        "National Vulnerability Database source used for CVE correlation and vulnerability enrichment.",
+      ),
+      makeExternalReference(
+        "MITRE ATT&CK",
+        "MITRE ATT&CK knowledge base used for technique and mitigation mapping.",
+      ),
+      makeExternalReference(
+        "WHOIS",
+        "WHOIS or RDAP enrichment source used for registration, network, and ownership metadata.",
+      ),
     ],
-    x_cti_report_id: reportId || null,
-    x_cti_cve_risk_score: cveRiskScore,
   };
 
   objects.push(reportObject);
