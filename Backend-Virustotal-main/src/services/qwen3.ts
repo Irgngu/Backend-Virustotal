@@ -370,9 +370,6 @@ function buildReferences(data: any): string {
 // ══════════════════════════════════════════════════════
 
 export async function generateReportAI(data: any) {
-  console.log("===== DATA API SEBELUM MASUK KE AI =====");
-  console.log(JSON.stringify(data, null, 2));
-  console.log("========================================");
   const client = new OpenAI({
     baseURL: "https://openrouter.ai/api/v1",
     apiKey: process.env.OPENROUTER_API_KEY,
@@ -420,21 +417,6 @@ export async function generateReportAI(data: any) {
   );
 
   const now = new Date().toISOString();
-  const debugDir = path.join(process.cwd(), "debug-api-json");
-
-  if (!fs.existsSync(debugDir)) {
-    fs.mkdirSync(debugDir, { recursive: true });
-  }
-
-  const safeReportId = reportId || `report-${Date.now()}`;
-
-  fs.writeFileSync(
-    path.join(debugDir, `${safeReportId}.json`),
-    JSON.stringify(data, null, 2),
-    "utf-8",
-  );
-
-  console.log(`[DEBUG] API JSON saved: debug-api-json/${safeReportId}.json`);
 
   const cveBlock = buildCVEBlock(cveMatches, cveRiskScore);
 

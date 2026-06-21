@@ -82,18 +82,9 @@ app.get("/history", async (c) => {
       );
     }
 
-    const allHistory = loadHistory();
     const isAdmin = profile?.role === "admin";
 
-    const history = isAdmin
-      ? allHistory
-      : allHistory.filter((entry) => {
-          if (entry.userId) {
-            return entry.userId === user.id;
-          }
-
-          return entry.email === user.email;
-        });
+    const history = isAdmin ? await loadHistory() : await loadHistory(user.id);
 
     return c.json({
       success: true,
@@ -116,11 +107,24 @@ app.get("/history", async (c) => {
 /* ══════════════════════════════════════
    GET /history/:id  — ambil satu report
 ══════════════════════════════════════ */
-app.get("/history/:id", (c) => {
+app.get("/history/:id", async (c) => {
   const reportId = c.req.param("id");
-  const entry = getReportById(reportId);
-  if (!entry) return c.json({ error: "Report not found" }, 404);
-  return c.json({ success: true, entry });
+
+  const entry = await getReportById(reportId);
+
+  if (!entry) {
+    return c.json(
+      {
+        error: "Report not found",
+      },
+      404,
+    );
+  }
+
+  return c.json({
+    success: true,
+    entry,
+  });
 });
 
 // ===============================ADMIN CHECK & ACTIVITY LOGGING (BARU)============================== */
@@ -576,7 +580,18 @@ app.post("/chat", async (c) => {
       username = "Unknown",
       email = "unknown@-",
     } = await c.req.json();
-    const { user, profile } = await getAuthUser(c);
+
+    const { user, profile, error } = await getAuthUser(c);
+
+    if (error || !user) {
+      return c.json(
+        {
+          success: false,
+          error: "Unauthorized",
+        },
+        401,
+      );
+    }
 
     if (!indicator || !type) {
       return c.json({ error: "indicator & type required" }, 400);
@@ -935,7 +950,7 @@ app.post("/chat", async (c) => {
     /* ── Simpan ke history & broadcast WS ── */ // ← TAMBAH BLOK INI
     const historyEntry = {
       reportId,
-      ...(user?.id ? { userId: user.id } : {}),
+      userId: user.id,
       username:
         profile?.name ||
         user?.user_metadata?.name ||
@@ -949,7 +964,7 @@ app.post("/chat", async (c) => {
       createdAt: now.toISOString(),
     };
 
-    saveToHistory(historyEntry);
+    await saveToHistory(historyEntry);
     broadcastNewReport(historyEntry);
 
     /* ===============================

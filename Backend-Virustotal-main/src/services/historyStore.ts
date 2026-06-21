@@ -1,45 +1,97 @@
-import fs from "fs";
-import path from "path";
+// src/services/historyStore.ts
 
-const DATA_DIR = path.join(process.cwd(), "data");
-const HISTORY_FILE = path.join(DATA_DIR, "history.json");
+import { supabase } from "./auth.js";
 
 export interface HistoryEntry {
   reportId: string;
-  userId?: string;
+  userId: string;
   username: string;
   email: string;
   ioc: string;
   iocType: string;
   threatLevel: string;
   aiAnalysis: string;
-  createdAt: string; // ISO string
+  createdAt?: string;
 }
 
-function ensureDataDir(): void {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
+export async function saveToHistory(entry: HistoryEntry): Promise<void> {
+  const { error } = await supabase.from("report_history").insert({
+    report_id: entry.reportId,
+    user_id: entry.userId,
+    username: entry.username,
+    email: entry.email,
+    ioc: entry.ioc,
+    ioc_type: entry.iocType,
+    threat_level: entry.threatLevel,
+    ai_analysis: entry.aiAnalysis,
+    created_at: entry.createdAt,
+  });
+
+  if (error) {
+    throw error;
   }
 }
 
-export function loadHistory(): HistoryEntry[] {
-  ensureDataDir();
-  if (!fs.existsSync(HISTORY_FILE)) return [];
-  try {
-    return JSON.parse(fs.readFileSync(HISTORY_FILE, "utf-8")) as HistoryEntry[];
-  } catch {
-    return [];
+export async function loadHistory(userId?: string): Promise<HistoryEntry[]> {
+  let query = supabase.from("report_history").select("*").order("created_at", {
+    ascending: false,
+  });
+
+  if (userId) {
+    query = query.eq("user_id", userId);
   }
+
+  const { data, error } = await query;
+
+  if (error) {
+    throw error;
+  }
+
+  return (data || []).map((row) => ({
+    reportId: row.report_id,
+    userId: row.user_id,
+
+    username: row.username,
+    email: row.email,
+
+    ioc: row.ioc,
+    iocType: row.ioc_type,
+
+    threatLevel: row.threat_level,
+
+    aiAnalysis: row.ai_analysis,
+
+    createdAt: row.created_at,
+  }));
 }
 
-export function saveToHistory(entry: HistoryEntry): void {
-  ensureDataDir();
-  const history = loadHistory();
-  history.unshift(entry); // newest first
-  fs.writeFileSync(HISTORY_FILE, JSON.stringify(history, null, 2), "utf-8");
-}
+export async function getReportById(
+  reportId: string,
+): Promise<HistoryEntry | null> {
+  const { data, error } = await supabase
+    .from("report_history")
+    .select("*")
+    .eq("report_id", reportId)
+    .maybeSingle();
 
-export function getReportById(reportId: string): HistoryEntry | null {
-  const history = loadHistory();
-  return history.find((e) => e.reportId === reportId) ?? null;
+  if (error || !data) {
+    return null;
+  }
+
+  return {
+    reportId: data.report_id,
+    userId: data.user_id,
+
+    username: data.username,
+    email: data.email,
+
+    ioc: data.ioc,
+    iocType: data.ioc_type,
+
+    threatLevel: data.threat_level,
+
+    aiAnalysis: data.ai_analysis,
+
+    createdAt: data.created_at,
+  };
 }
