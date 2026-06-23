@@ -40,7 +40,6 @@ export interface CVEDetail {
   cvss_severity: string | null;
   cvss_vector: string | null;
   cvss_metrics: CVEMetrics;
-  cwe: string[];
   affected_products: string[];
   affected_versions: AffectedVersion[];
   remediation: RemediationInfo[];
@@ -261,14 +260,6 @@ export async function fetchCVEFromNVD(
       vuln.metrics?.cvssMetricV30?.[0]?.cvssData ||
       null;
 
-    const cweList: string[] = (vuln.weaknesses || [])
-      .flatMap((w: any) =>
-        (w.description || [])
-          .filter((d: any) => d.lang === "en")
-          .map((d: any) => d.value as string),
-      )
-      .filter(Boolean);
-
     const affectedProducts: string[] = [];
     const affectedVersions = parseAffectedVersions(vuln.configurations || []);
 
@@ -312,7 +303,6 @@ export async function fetchCVEFromNVD(
         availability_impact: cvssV3?.availabilityImpact ?? null,
       },
 
-      cwe: [...new Set(cweList)],
 
       affected_products: [...new Set(affectedProducts)].slice(0, 8),
 
