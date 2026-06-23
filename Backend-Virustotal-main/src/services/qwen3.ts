@@ -16,6 +16,36 @@ function formatReport(text: string): string {
     .trim();
 }
 
+function normalizeMarkdownHeadings(text: string): string {
+  const sections = [
+    "EXECUTIVE SUMMARY",
+    "THREAT OVERVIEW",
+    "VULNERABILITY ANALYSIS",
+    "THREAT INTELLIGENCE (MISP)",
+    "WHOIS INTELLIGENCE",
+    "FILE HISTORY",
+    "PE HEADER ANALYSIS",
+    "MITRE ATT&CK ANALYSIS",
+    "IMPACT ANALYSIS",
+    "MITIGATION STRATEGIES",
+    "CONCLUSION",
+    "REFERENCES",
+  ];
+
+  let result = text;
+
+  for (const section of sections) {
+    const regex = new RegExp(`^${section}$`, "gm");
+    result = result.replace(regex, `## ${section}`);
+  }
+
+  result = result.replace(
+    /^THREAT INTELLIGENCE REPORT$/gm,
+    "# THREAT INTELLIGENCE REPORT",
+  );
+
+  return result;
+}
 // ══════════════════════════════════════════════════════
 // CVE BLOCK
 // ══════════════════════════════════════════════════════
@@ -446,6 +476,14 @@ export async function generateReportAI(data: any) {
   const systemPrompt = `
 You are a cybersecurity analyst.
 Write a professional Threat Intelligence Report.
+IMPORTANT FORMAT RULES:
+- Use Markdown format.
+- Main report title MUST use "#".
+- Every major section MUST use "##".
+- Never write section titles as plain text.
+- Never omit heading symbols.
+- Preserve headings exactly.
+- Use bullet lists where appropriate.
 Use ONLY provided data.
 DO NOT include "Prepared by", "Contact", organization, or author info.
 Keep mitigation strategies AND MITRE ATT&CK ANALYSIS as single-line entries.
@@ -454,19 +492,19 @@ Use the provided CVE affected versions and remediation references if available.
 `;
 
   const userPrompt = `
-THREAT INTELLIGENCE REPORT
+# THREAT INTELLIGENCE REPORT
 --------------------------------------------------
 Report ID : ${reportId}
 Date: ${now}
 --------------------------------------------------
 
-EXECUTIVE SUMMARY
+## EXECUTIVE SUMMARY
 
 ${correlationInsights}
 
 --------------------------------------------------
 
-THREAT OVERVIEW
+## THREAT OVERVIEW
 
 --- VirusTotal ---
 
@@ -482,7 +520,7 @@ ${abuseOverviewBlock}`
 
 --------------------------------------------------
 
-VULNERABILITY ANALYSIS
+## VULNERABILITY ANALYSIS
 
 ${cveBlock}
 
@@ -495,7 +533,7 @@ Instruction:
 
 --------------------------------------------------
 
-THREAT INTELLIGENCE (MISP)
+## THREAT INTELLIGENCE (MISP)
 
 ${mispBlock}
 
@@ -505,7 +543,7 @@ ${
 
 --------------------------------------------------
 
-WHOIS INTELLIGENCE
+## WHOIS INTELLIGENCE
 
 ${whoisBlock}
 `
@@ -517,13 +555,13 @@ ${
     ? `
 --------------------------------------------------
 
-FILE HISTORY
+## FILE HISTORY
 
 ${historyBlock}
 
 --------------------------------------------------
 
-PE HEADER ANALYSIS
+## PE HEADER ANALYSIS
 
 ${peHeaderBlock}
 `
@@ -532,25 +570,25 @@ ${peHeaderBlock}
 
 --------------------------------------------------
 
-MITRE ATT&CK ANALYSIS
+## MITRE ATT&CK ANALYSIS
 
 ${mitreBlock}
 
 --------------------------------------------------
 
-IMPACT ANALYSIS
+## IMPACT ANALYSIS
 
 Explain impact based on CVE severity, affected versions, exploit availability, and MITRE techniques.
 
 --------------------------------------------------
 
-MITIGATION STRATEGIES
+## MITIGATION STRATEGIES
 
 ${mitigationBlock}
 
 --------------------------------------------------
 
-CONCLUSION
+## CONCLUSION
 
 Summarize the threat.
 
