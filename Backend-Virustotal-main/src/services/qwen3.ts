@@ -449,6 +449,8 @@ export async function generateReportAI(data: any) {
   const now = new Date().toISOString();
 
   const cveBlock = buildCVEBlock(cveMatches, cveRiskScore);
+  console.log("CVE BLOCK:");
+  console.log(cveBlock);
 
   const mispBlock = buildMISPBlock(mispData);
 
@@ -492,7 +494,7 @@ Use the provided CVE affected versions and remediation references if available.
 `;
 
   const userPrompt = `
-# THREAT INTELLIGENCE REPORT
+## THREAT INTELLIGENCE REPORT
 --------------------------------------------------
 Report ID : ${reportId}
 Date: ${now}

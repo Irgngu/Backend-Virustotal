@@ -87,7 +87,6 @@ function parseNVDResult(data: any) {
       cvss_score: cvssV3?.baseScore ?? null,
       cvss_severity: cvssV3?.baseSeverity ?? null,
       cvss_vector: cvssV3?.vectorString ?? null,
-
       affected_versions: parseAffectedVersions(cve.configurations || []),
 
       remediation,
