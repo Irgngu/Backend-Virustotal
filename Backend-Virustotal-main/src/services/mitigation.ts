@@ -10209,25 +10209,25 @@ const TECHNIQUE_MAP: TechniqueEntry[] = [
 
 const BASELINE_MITIGATIONS: MitigationAction[] = [
   {
-    id: "NIST-IR-1",
-    name: "Document & Escalate Finding",
+    id: "IR-01",
+    name: "Incident Response Preparation",
     description:
-      "Record all findings with timestamps in your incident tracking system. Escalate to SOC Tier 2 if threat level is HIGH or CRITICAL. Aligns with NIST SP 800-61r2 Section 3.2 (Detection & Analysis).",
-    framework: "NIST SP 800-61r2",
+      "Ensure incident response policies, roles, responsibilities, and procedures are established and maintained to support effective incident handling.",
+    framework: "NIST SP 800-61r3",
   },
   {
-    id: "NIST-IR-2",
-    name: "Update Threat Intelligence Feeds",
+    id: "IR-02",
+    name: "Incident Detection and Analysis",
     description:
-      "Export this IOC to SIEM and TIP. Create correlation detection rules. Share with relevant ISACs. Aligns with NIST CSF DE.AE-2 and MITRE ATT&CK D3FEND.",
-    framework: "NIST CSF + MITRE D3FEND",
+      "Analyze indicators and threat information to identify potential cybersecurity incidents, assess their impact, and support response prioritization.",
+    framework: "NIST SP 800-61r3",
   },
   {
-    id: "NIST-IR-3",
-    name: "Post-Incident Review",
+    id: "IR-03",
+    name: "Continuous Improvement",
     description:
-      "Conduct a lessons-learned review after containment. Update detection playbooks and IR runbooks. Aligns with NIST SP 800-61r2 Section 3.4 (Post-Incident Activity).",
-    framework: "NIST SP 800-61r2",
+      "Use lessons learned from cybersecurity incidents to improve incident response processes, cybersecurity practices, and risk management activities.",
+    framework: "NIST SP 800-61r3",
   },
 ];
 
